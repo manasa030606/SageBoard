@@ -18,7 +18,10 @@ The single list of architectural decisions. Details live in `docs/adr/`. Statuse
 | D11 | Dashboard semantics | Default | Pinned widgets re-execute stored, re-validated SQL; no LLM | PRD §5.2 |
 | D12 | What the LLM sees | Default | Schema + profiles + ≤ 50-row previews + facts; sensitive columns masked | SECURITY_DESIGN §6 |
 | D13 | Package managers & tooling | Default (implemented) | pnpm + uv; ruff, mypy strict, ESLint, Prettier, Vitest, pytest | [ADR-0001](adr/0001-monorepo-and-tooling.md) |
-| D14 | Typography | Default (implemented) | IBM Plex Sans / Mono, self-hosted via Fontsource; Source Serif 4 for headings (Phase 8) | PRD §8 |
+| D14 | Typography | Default (implemented) | IBM Plex Sans / Mono and Source Serif 4 (display/headings), all self-hosted via Fontsource | PRD §8 |
+| D23 | Brand palette | **Final** (2026-11-12, owner) | Navy #192C35 · forest #315B50 · sage #C4DDCB · warm white #F4F2EC · amber #D99A57 · text #202925 · secondary #727B76. For AA contrast, small secondary text uses #66706A (4.6:1); #727B76 is kept for icons, placeholders and large text. Amber is never small text on light surfaces | PRD §8, `apps/web/src/app/globals.css` |
+| D24 | Phase order | **Final** (2026-11-12, owner) | Frontend UI with demo data is Phase 2; authentication moves to Phase 3 and later phases shift by one | DEVELOPMENT_ROADMAP §2 |
+| D25 | Demo data policy (Phase 2) | **Final** | Mock data only in `src/mocks`, read through `src/lib/data`; every figure is derived from one seeded series; the analyst replays recorded sample runs only for their exact questions and never answers other questions; demo state is labelled in the UI | ADR-0006, PHASE_2_REPORT |
 | D15 | Upload limits | Default | 25 MB, 1M rows, 200 columns, 10 sheets | SECURITY_DESIGN §8 |
 | D16 | Follow-up questions | Default | Summaries of the last 3 runs in the conversation | AGENT_WORKFLOW §3 |
 | D17 | Tracing | Default | DB trace always; LangSmith optional, off | SYSTEM_ARCHITECTURE §4 |
@@ -33,5 +36,6 @@ The single list of architectural decisions. Details live in `docs/adr/`. Statuse
 | Date | Change |
 |---|---|
 | 2026-11-11 | Blueprint v0.1 published with open decisions D1–D22 |
+| 2026-11-12 | Phase 2 (frontend UI/UX with demo data) implemented; palette D23, phase order D24 and demo-data policy D25 recorded |
 | 2026-11-12 | Owner has no Docker: local setup switched to native PostgreSQL via `infra/postgres/setup-local.sh`; Docker Compose kept as optional. Role bootstrap now re-syncs passwords on every run |
 | 2026-11-12 | D1, D5, D8 finalised by the owner. ADR-0001…0007 written. Phase 1 approved and implemented. Application tables (`users`, `user_settings`, `refresh_tokens`, `audit_log`) moved from Phase 1 to Phase 2 (they belong with authentication); Phase 1 delivers the `app` schema, roles and migration baseline |

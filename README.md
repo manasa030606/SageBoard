@@ -2,7 +2,7 @@
 
 **An agentic AI system for autonomous business data analysis.** Ask a business question in plain language. Sageboard plans the analysis, writes and validates read-only SQL, runs it, analyses the results, charts them, and reports insights backed by the actual query results.
 
-> **Status: Phase 1 — Project Foundation (complete).** The web app and API start, talk to each other, and report health. No product features yet. See [`docs/DEVELOPMENT_ROADMAP.md`](docs/DEVELOPMENT_ROADMAP.md).
+> **Status: Phase 2 — Frontend UI/UX (complete, demo data).** All seven product pages are built on a bundled sample dataset; the AI backend arrives in later phases. Phase 1 (foundation) is complete too. See [`docs/DEVELOPMENT_ROADMAP.md`](docs/DEVELOPMENT_ROADMAP.md).
 
 ## Repository layout
 
@@ -51,7 +51,7 @@ make api        # http://localhost:8000/api/v1/healthz · docs at /api/v1/docs
 make web        # http://localhost:3000
 ```
 
-Open http://localhost:3000. The **System status** page calls the web app's own health route and the API's `/healthz` and `/readyz` from your browser. When everything shows *Operational / Ready*, the stack is wired correctly.
+Open http://localhost:3000 for the landing page, or http://localhost:3000/app/dashboard for the product. **Settings → System status** (or `/status`) checks the web app, the API and the database live from your browser.
 
 Prefer Docker? `make db-up` starts PostgreSQL 16 in a container instead of step 3. It is optional. See [`infra/README.md`](infra/README.md).
 

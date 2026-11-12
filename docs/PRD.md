@@ -174,23 +174,22 @@ IDs are referenced by the tests in TESTING_STRATEGY.md.
 
 ## 8. Design direction (summary — full tokens are defined in Phase 7)
 
-**Palette (initial proposal, to be contrast-checked during the design-system phase):**
+**Palette (final, D23 — implemented as tokens in `apps/web/src/app/globals.css`):**
 
 | Token | Hex | Use |
 |---|---|---|
-| `navy-950` | `#0E1A2B` | Primary text, app sidebar background |
-| `navy-800` | `#1C2B40` | Secondary surfaces in dark regions |
-| `forest-700` | `#1F4D3A` | Primary action, success, selected state |
-| `forest-600` | `#2A6249` | Primary hover |
-| `sage-300` | `#B7C7B4` | Borders, subtle fills, chart secondary |
-| `sage-100` | `#E6ECE3` | Hover rows, tag backgrounds |
-| `warm-white` | `#FAF8F3` | App background |
-| `paper` | `#FFFFFF` | Content surfaces |
-| `amber-600` | `#B7791F` | Warnings, highlights, single accent in charts (never body text on white) |
-| `rust-700` | `#9B3B2A` | Errors / destructive |
+| `navy` | `#192C35` | Brand headings, dark bands, emphasis surfaces |
+| `forest` | `#315B50` | Primary actions, selection, positive change, chart series 1 |
+| `sage` | `#C4DDCB` | Selection, light fills, chart comparison series (`sage-600`) |
+| `warm` | `#F4F2EC` | App background |
+| `paper` | `#FFFFFF` | Tables, charts and content surfaces |
+| `amber` | `#D99A57` | Accent, evidence highlight, warnings (fills only; `amber-ink` #8A5A1F for text) |
+| `ink` | `#202925` | Main text (13.4:1 on warm) |
+| `ink-2` / `ink-3` | `#66706A` / `#727B76` | Secondary text (AA-tuned) / icons, placeholders, large text |
+| `rust` | `#A3412E` | Errors, negative change, destructive |
 
 - **Shape:** 4 px radius default and 6 px for overlays. Separate regions with hairline borders (1 px `sage-300`) rather than card shadows.
-- **Typography (D14):** IBM Plex Sans (UI), IBM Plex Mono (SQL, numbers in tables use tabular figures), Source Serif 4 for landing-page and report headings only.
+- **Typography (D14):** IBM Plex Sans (UI), IBM Plex Mono (SQL, axis labels, figures), Source Serif 4 for page titles, landing and report headings (editorial voice).
 - **Motion:** 120–180 ms ease-out for state changes; streamed trace steps fade in; no looping or decorative motion; respects `prefers-reduced-motion`.
 - **Charts:** Recharts with a restrained categorical palette (forest, navy, sage, amber, slate). Axis labels in mono tabular figures; no 3D, no pie charts above 5 slices.
 

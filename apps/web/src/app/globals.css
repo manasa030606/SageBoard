@@ -1,52 +1,122 @@
 @import "tailwindcss";
 
 /*
- * Sageboard design tokens — Phase 1 foundation (colour, type, spacing, radius, motion).
- * Components arrive in Phase 8. Rules: no gradients, hairline borders over shadows,
- * 4px default radius, amber is an accent only (never body text on light surfaces).
+ * Sageboard design tokens (Phase 2 palette).
+ * Rules: no gradients · hairline borders over shadows · 6px radius max on content ·
+ * amber is an accent/fill only (never small text on light surfaces) · numbers use
+ * tabular figures · motion is short and functional.
+ *
+ * Contrast (WCAG 2.2, measured):
+ *   ink #202925 on warm 13.4:1 · ink-2 #66706A on warm 4.6:1 (small text OK)
+ *   ink-3 #727B76 on warm 3.9:1 → icons, placeholders, ≥18px text only
+ *   forest #315B50 on warm 6.8:1 · warm on forest 6.8:1 · warm on navy 12.9:1
  */
 @theme {
-  /* Colour ------------------------------------------------------------- */
-  --color-navy-950: #0e1a2b;
-  --color-navy-900: #142235;
-  --color-navy-800: #1c2b40;
-  --color-navy-600: #3a4a61;
-  --color-navy-400: #6b7890;
+  /* Brand ------------------------------------------------------------ */
+  --color-navy: #192c35;
+  --color-navy-700: #233c47;
+  --color-navy-600: #2f4c58;
 
-  --color-forest-800: #183d2e;
-  --color-forest-700: #1f4d3a;
-  --color-forest-600: #2a6249;
-  --color-forest-100: #dfeae3;
+  --color-forest: #315b50;
+  --color-forest-700: #284b42;
+  --color-forest-50: #e7efe9;
 
-  --color-sage-400: #9aae97;
-  --color-sage-300: #b7c7b4;
-  --color-sage-200: #d3ddd0;
-  --color-sage-100: #e6ece3;
+  --color-sage: #c4ddcb;
+  --color-sage-600: #8fb39a;
+  --color-sage-100: #dfece2;
+  --color-sage-50: #eef5f0;
 
-  --color-warm-white: #faf8f3;
+  --color-amber: #d99a57;
+  --color-amber-100: #f6e7d4;
+  --color-amber-ink: #8a5a1f;
+
+  --color-rust: #a3412e;
+  --color-rust-50: #f7e5e0;
+
+  /* Neutrals --------------------------------------------------------- */
+  --color-warm: #f4f2ec;
+  --color-warm-200: #ece9e1;
+  --color-warm-300: #e4e0d6;
   --color-paper: #ffffff;
+  --color-line: #dfdbd1;
+  --color-line-strong: #c9c4b8;
 
-  --color-amber-600: #b7791f;
-  --color-amber-100: #f6ead3;
+  --color-ink: #202925;
+  --color-ink-2: #66706a;
+  --color-ink-3: #727b76;
 
-  --color-rust-700: #9b3b2a;
-  --color-rust-100: #f4e1dc;
+  /* Chart series (categorical, in order of use) ------------------------ */
+  --color-series-1: #315b50;
+  --color-series-2: #192c35;
+  --color-series-3: #d99a57;
+  --color-series-4: #8fb39a;
+  --color-series-5: #8c979e;
 
-  /* Typography --------------------------------------------------------- */
+  /* Typography ------------------------------------------------------- */
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Source Serif 4", ui-serif, Georgia, serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
 
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
 
-  /* Shape & motion ----------------------------------------------------- */
-  --radius-sm: 2px;
-  --radius: 4px;
+  /* Shape, elevation, motion ------------------------------------------- */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
   --radius-md: 6px;
+  --shadow-overlay: 0 12px 32px -12px rgb(25 44 53 / 0.28), 0 2px 6px rgb(25 44 53 / 0.08);
+  --ease-quiet: cubic-bezier(0.2, 0.7, 0.2, 1);
 
-  --ease-out-quiet: cubic-bezier(0.2, 0.7, 0.2, 1);
-  --duration-fast: 120ms;
-  --duration-base: 180ms;
+  --animate-rise: rise 220ms var(--ease-quiet) both;
+  --animate-fade: fade 160ms ease-out both;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+/* Reusable text styles (used instead of repeating utility strings) ------ */
+@utility text-display {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+@utility text-title {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: var(--text-2xs--line-height);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-ink-2);
+}
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+@utility focus-ring {
+  outline: 2px solid var(--color-forest);
+  outline-offset: 2px;
 }
 
 @layer base {
@@ -56,26 +126,36 @@
 
   html {
     font-family: var(--font-sans);
-    font-feature-settings: "ss02";
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
   body {
-    background-color: var(--color-warm-white);
-    color: var(--color-navy-950);
+    background-color: var(--color-warm);
+    color: var(--color-ink);
   }
 
-  /* Numbers in tables, metrics and code always use tabular figures. */
-  .tabular,
   code,
   kbd,
-  samp {
+  samp,
+  pre {
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
   }
 
+  ::selection {
+    background: var(--color-sage);
+    color: var(--color-ink);
+  }
+
   :focus-visible {
-    outline: 2px solid var(--color-forest-600);
+    outline: 2px solid var(--color-forest);
     outline-offset: 2px;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-ink-3);
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -83,7 +163,19 @@
     *::before,
     *::after {
       animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
     }
+  }
+}
+
+/* Print: reports render as clean documents ------------------------------ */
+@media print {
+  [data-print-hide] {
+    display: none !important;
+  }
+  body {
+    background: #fff;
   }
 }
