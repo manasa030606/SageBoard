@@ -1,0 +1,39 @@
+# Install once:  uvx pre-commit install
+# Run manually:  uvx pre-commit run --all-files
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: detect-private-key
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check (api)
+        entry: bash -c 'cd apps/api && uv run ruff check --fix .'
+        language: system
+        files: ^apps/api/.*\.py$
+        pass_filenames: false
+      - id: ruff-format
+        name: ruff format (api)
+        entry: bash -c 'cd apps/api && uv run ruff format .'
+        language: system
+        files: ^apps/api/.*\.py$
+        pass_filenames: false
+      - id: web-lint
+        name: eslint + prettier (web)
+        entry: bash -c 'cd apps/web && pnpm lint && pnpm format:check'
+        language: system
+        files: ^apps/web/.*\.(ts|tsx|mjs|css|json)$
+        pass_filenames: false

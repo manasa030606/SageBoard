@@ -1,0 +1,106 @@
+# Sageboard — Development Roadmap
+
+| Field | Value |
+|---|---|
+| Document | DEVELOPMENT_ROADMAP v0.2 |
+| Status | Approved 2026-11-12 (v0.2). **No phase starts without explicit approval.** Phase 1 done |
+| Rule | Each phase follows the 10-step process in the project instructions (inspect → explain → list files → implement → test → fix → explain → limitations → run commands → commit message). |
+
+---
+
+## 1. Implementation order (why this sequence)
+
+1. **Foundations first** (repo, config, DB, auth). Everything depends on them.
+2. **Data layer before the agent.** The agent needs real schemas and real data to reason over. Per the project rules, no mock data stands in for the real thing.
+3. **Safety core before any LLM code.** SQL Guard + Executor are built and attacked first, so the agent is born inside a safe box.
+4. **Agent in two halves.** First query → SQL → results (correctness), then analysis → insights → verification (grounding).
+5. **Streaming API, then frontend.** The UI is built against real events, not a mocked stream.
+6. **Hardening, deployment, demo prep** last, but with tests written alongside every phase.
+
+## 2. Phase plan
+
+| Phase | Name | Key deliverables | Depends on | Exit criteria |
+|---|---|---|---|---|
+| **1** | Monorepo & platform foundation | Monorepo skeleton (§SYSTEM_ARCH 6); `docker-compose` Postgres 16; FastAPI app with settings, structlog, error envelope, `/healthz` `/readyz`; SQLAlchemy async session; base DB roles + hardening script (ADR-0002); Alembic baseline (`app` schema only; app tables move to Phase 2); Next.js app scaffold with Tailwind + design tokens file (colour/typography/spacing only); Makefile; CI for lint/typecheck/unit; pre-commit with gitleaks; ADR-0001..0007 + decision log; web↔API system-status page | — | **Done 2026-11-12** — web + API start; `/readyz` 200 with DB; browser calls API across origins; lint/type/tests green (see phase report) |
+| **2** | Authentication | Alembic migrations for `users`, `user_settings`, `refresh_tokens`, `audit_log`; register/login/logout/refresh/me; argon2id; JWT + refresh rotation; CSRF double-submit; rate limiting on login; auth dependency; Next.js login/register pages (functional, styled with tokens); middleware redirect | 1 | Auth integration + security tests pass; cookies/flags verified |
+| **3** | Dataset ingestion & catalog | Upload (CSV/XLSX) → inference → review → finalise; identifier normalisation; `ds_` schema + role creation; COPY load; profiling; relationships inference; sample dataset generator + per-user provisioning; dataset APIs (list/detail/preview/patch/delete) | 2 | Ingestion integration tests; upload attack tests; sample dataset checksum test |
+| **4** | SQL safety core | SQL Guard (all rules §SECURITY 4), Executor (session hardening, EXPLAIN gate, row cap, cancellation), adversarial + benign corpora, layer-isolation test, Hypothesis fuzzing | 3 | 100% corpus pass; ≥95% coverage on security/execution; layer-isolation proven |
+| **5** | Agent core: question → validated results | Provider evaluation (`docs/LLM_PROVIDER_EVALUATION.md`, ADR-0006); LLM adapter with Anthropic/OpenAI/Gemini/mock providers (structured outputs, retries, usage capture); `AgentState`; nodes: load_context, understand_query, request_clarification, retrieve_schema (tool loop), plan_analysis, generate_sql, validate_sql, execute_sql, check_result, step routing; budget; checkpointer; trace persistence (run_steps, tool_calls, llm_calls, sql_queries, query_results) | 4 | Agent scripted tests (§TESTING 4, SQL-side) pass; graph-structure test; first real-LLM eval of execution accuracy recorded honestly |
+| **6** | Agent analysis & grounding | Analysis engine (facts), analyze_results, generate_visualization + spec validator, generate_insights, verify_insights (deterministic + judge), compose_report; full eval metrics | 5 | Grounding tests pass; eval: execution accuracy and grounding violations reported; violations = 0 or blocking issues listed |
+| **7** | Runs API & streaming | Conversations/runs endpoints; Run Manager (asyncio tasks, concurrency, cancel, resume); event bus + `run_events` persistence; SSE with replay; usage counters & budgets; history endpoints | 6 | SSE integration tests incl. reconnect; cancel/resume tests |
+| **8** | Design system & app shell + landing | Tokens finalised with contrast checks; primitives (Button, Input, Table, Tabs, Drawer, Dialog, Badge, Skeleton, EmptyState, ErrorState, Toast); app shell (sidebar, dataset switcher, ⌘K); landing page; typed API client generation | 2 (can start in parallel after 7 for API types) | Storybook-free component gallery route `/app/_gallery` (dev only); a11y checks pass; landing reviewed against UI rules |
+| **9** | Data sources UI | Upload flow with review step, dataset list/detail, profiles, column description editing, delete; all states | 3, 8 | Playwright `dataset-upload` passes |
+| **10** | Analyst workspace UI | Conversation list, composer with dataset selector, streaming run card, Run Inspector, result tables (sort/paginate/CSV), ChartRenderer, evidence popovers, clarification UI, cancel, error/partial states | 7, 8, 9 | Playwright analyst specs pass; reducer unit tests |
+| **11** | Reports, dashboard, history, settings | Reports CRUD + Markdown export + print CSS; dashboard widgets (pin, layout, refresh); history table + drawer; settings + usage + account deletion | 10 | Remaining Playwright specs pass |
+| **12** | Hardening | Full E2E + visual regression + a11y + responsive; performance pass (query timing, bundle size); retention job; security acceptance criteria (§SECURITY 12) | 11 | All CI gates green; security checklist signed off |
+| **13** | Deployment | Dockerfile; Render/Railway service; managed Postgres with role bootstrap runbook; Vercel project; env/secrets; cookie/CORS for prod domains; smoke tests against prod; nightly eval | 12 | Public URL works end-to-end; runbook in `docs/DEPLOYMENT.md` |
+| **14** | Documentation & demo prep | README, architecture diagrams, ADRs complete, eval report, demo script with sample questions (incl. a recovery and a refusal case), known limitations | 13 | Rehearsed demo |
+
+Optional post-MVP phases: external Postgres connectors (D2), team workspaces (D4), job queue (D6), multi-dataset conversations.
+
+## 3. Critical path and parallelism
+```
+1 → 2 → 3 → 4 → 5 → 6 → 7 → 10 → 11 → 12 → 13 → 14
+          └──────── 8 (design system) ─┘ 9 ┘
+```
+Phase 8 can start any time after Phase 2 if you want frontend work in parallel (useful for a 5-person team). The highest-risk items are on the critical path: the Guard (4) and grounding (6).
+
+## 4. Key dependencies (packages)
+
+| Area | Packages (pin in lockfiles) |
+|---|---|
+| API | `fastapi`, `uvicorn[standard]`, `pydantic>=2`, `pydantic-settings`, `sqlalchemy[asyncio]>=2`, `asyncpg`, `alembic`, `argon2-cffi`, `pyjwt`, `structlog`, `sse-starlette`, `python-multipart`, `openpyxl`, `slowapi` (rate limiting) |
+| Agent | `langgraph`, `langgraph-checkpoint-postgres`, `psycopg[binary,pool]` (required by the checkpointer), `sqlglot`, provider SDK (`anthropic` or `openai`), `tenacity` |
+| Analysis | stdlib `statistics` + `decimal`. **No pandas in MVP** (smaller surface, deterministic; reconsider if needed) |
+| Testing | `pytest`, `pytest-asyncio`, `pytest-cov`, `hypothesis`, `httpx`, `testcontainers[postgres]` (or compose service), `respx` |
+| Web | `next`, `react`, `typescript`, `tailwindcss`, `recharts`, `@tanstack/react-query`, `@radix-ui/react-*` (behaviour only), `openapi-typescript`, `zod` (form validation), `react-markdown` + `rehype-sanitize`, `@playwright/test`, `@axe-core/playwright`, `vitest`, `@testing-library/react` |
+| Tooling | `uv`, `pnpm`, `ruff`, `mypy`, `eslint`, `prettier`, `pre-commit`, `gitleaks`, `pip-audit` |
+
+Version note: exact versions get pinned in Phase 1 after checking the current releases (LangGraph and SQLGlot APIs change between minor versions; we'll pin and record them in ADR-0005).
+
+## 5. Risks and mitigations
+
+| Risk | Impact | Mitigation |
+|---|---|---|
+| Managed Postgres disallows `CREATE ROLE` | Weakens tenant isolation | Pick Neon/Railway (allow it) or use documented fallback mode (D5) |
+| Free-tier backend sleeps / restarts kill in-process runs | Runs lost mid-way | Persisted events + checkpoints; on startup mark orphaned `running` runs as `failed: interrupted`; paid tier for the demo (D6) |
+| LLM accuracy below target | Weak evaluation | Schema descriptions, join-path hints, few-shot from sample data, repair loop; report the real number regardless |
+| LLM cost overrun | Budget | Per-run/per-day caps; small model for understanding/verification judge, larger for SQL (configurable per node) |
+| Scope creep (7 pages + agent) | Missed deadline | Strict phase gates; reports/dashboard kept simple (snapshot + pin) |
+| SSE through proxies/CDN buffering | Stream stalls | `X-Accel-Buffering: no`, heartbeat, polling fallback (`GET /runs/{id}` every 2 s) |
+
+## 6. Open decisions
+
+> **Status (2026-11-12):** D1, D5 and D8 are **final**. The rest are accepted defaults. The authoritative, up-to-date list is **[DECISION_LOG.md](DECISION_LOG.md)**; the table below is the original proposal, kept for reference.
+
+| ID | Decision | Options | **Recommended default** | Why |
+|---|---|---|---|---|
+| D1 | LLM provider & model | Anthropic Claude / OpenAI / Google Gemini / local | **Provider-agnostic adapter; one provider configured via env. Which provider do you have API credits for?** | The adapter keeps us portable; your credits decide the default |
+| D2 | MVP data sources | Uploads only / + external Postgres | **CSV/XLSX upload + bundled sample dataset; external Postgres post-MVP** | External DBs bring SSRF and credential-storage work |
+| D3 | Auth approach | Custom FastAPI JWT / Auth.js / Clerk | **Custom FastAPI auth (argon2id, JWT + rotating refresh, httpOnly cookies)** | No third-party dependency; good learning value; full control |
+| D4 | Tenancy | Single-user / teams | **Single-user workspaces** | Enough for evaluation; isolation still enforced |
+| D5 | DB topology | 1 DB w/ schemas / separate app & warehouse DBs | **One Postgres, `app` + `ds_*` schemas, role-per-dataset; provider that supports CREATE ROLE (Neon or Railway)** | Cheapest with strong isolation |
+| D6 | Run execution | In-process asyncio / Redis + arq worker | **In-process asyncio with persisted events + checkpoints; 1 API instance** | Simpler deploy; upgrade path documented |
+| D7 | Streaming transport | SSE / WebSocket / polling | **SSE + polling fallback** | One-way stream fits; simpler through proxies |
+| D8 | Step order | Plan → schema (as requested) / schema → plan | **Schema retrieval before planning** (understanding gets the table catalog) | Avoids plans over non-existent columns (AGENT_WORKFLOW §2) |
+| D9 | Ambiguity handling | Always ask / assume & state / hybrid | **Hybrid: ask when the ambiguity blocks a correct answer; otherwise assume and state it. User setting can force either** | Fewer interruptions, still transparent |
+| D10 | Report export | Markdown / PDF (server) / print CSS | **In-app report + Markdown export + print-optimised CSS for PDF** | No headless-browser dependency on the server |
+| D11 | Dashboard semantics | Pinned snapshots / live re-execution / LLM refresh | **Pinned widgets re-execute stored, re-validated SQL; no LLM** | Deterministic, cheap, safe |
+| D12 | What the LLM sees | Full data / capped previews + facts | **Schema + profiles + ≤50-row previews + computed facts; sensitive columns masked** | Privacy, cost, grounding |
+| D13 | Package managers | npm / pnpm; pip / poetry / uv | **pnpm + uv** | Fast, lockfile-first |
+| D14 | Typography | Plex / Inter / custom | **IBM Plex Sans + IBM Plex Mono; Source Serif 4 for landing/report headings** | Distinctive, open-licence, good tabular figures |
+| D15 | Upload limits | — | **25 MB, 1M rows, 200 columns, 10 sheets** | Fits free-tier DB sizes |
+| D16 | Follow-up questions | Stateless / previous run context | **Include summaries (question, plan, final SQL, columns) of the last 3 runs in the conversation** | Natural follow-ups ("now split by month") without huge prompts |
+| D17 | Tracing | DB only / + LangSmith | **DB trace always; LangSmith optional via env, off by default** | No third-party data flow by default |
+| D18 | Business glossary | None / column descriptions / metrics layer | **Table & column descriptions + semantic role in MVP; named metric definitions post-MVP** | Big accuracy gain for small effort |
+| D19 | Data retention | — | **Query results 30 days unless referenced by report/widget; runs/SQL metadata kept until deletion** | Bounded storage |
+| D20 | Usage limits | — | **100 runs/day/user, 2 concurrent, token cap configurable (default 500k/day)** | Cost safety for a public demo |
+| D21 | Frontend component base | Fully custom / Radix primitives / shadcn | **Radix primitives for behaviour (a11y) + fully custom styling** | Avoids the generic look while keeping accessibility |
+| D22 | Team split (5 people) | — | Suggested: (1) backend platform+auth, (2) ingestion+DB, (3) Guard+executor+tests, (4) agent+eval, (5) frontend+design system. Phases stay sequential for review; parallel work happens inside a phase | You confirm actual ownership |
+
+## 7. Definition of Done (applies to every phase)
+- Code passes lint, typecheck and tests in CI. Results come from real runs.
+- New behaviour has tests at the appropriate level.
+- No secrets in code. `.env.example` is updated.
+- Docs/ADRs are updated for any architectural decision.
+- The phase report covers what was built, its limitations, run commands and a suggested commit message.

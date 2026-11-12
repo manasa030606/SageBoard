@@ -1,0 +1,148 @@
+"""Application settings.
+
+All configuration comes from environment variables (optionally loaded from a local
+``.env`` file that is never committed). Settings are validated once at startup so a
+misconfigured deployment fails fast instead of failing on the first request.
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+from functools import lru_cache
+from typing import Annotated, Self
+
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+class Environment(StrEnum):
+    DEVELOPMENT = "development"
+    TEST = "test"
+    PRODUCTION = "production"
+
+
+class LLMProvider(StrEnum):
+    """LLM providers the adapter layer will support (implemented in Phase 5).
+
+    ``mock`` is a deterministic, clearly labelled stand-in for development and
+    automated tests. It is refused in production (see ``_validate_llm``).
+    """
+
+    MOCK = "mock"
+    ANTHROPIC = "anthropic"
+    OPENAI = "openai"
+    GEMINI = "gemini"
+
+
+_PROVIDER_KEY_FIELD: dict[LLMProvider, str] = {
+    LLMProvider.ANTHROPIC: "anthropic_api_key",
+    LLMProvider.OPENAI: "openai_api_key",
+    LLMProvider.GEMINI: "gemini_api_key",
+}
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
+
+    # --- Service ---------------------------------------------------------
+    app_name: str = "sageboard-api"
+    app_version: str = "0.1.0"
+    env: Environment = Environment.DEVELOPMENT
+    log_level: str = "INFO"
+    log_json: bool = True
+    api_prefix: str = "/api/v1"
+
+    # --- HTTP / CORS -----------------------------------------------------
+    # Comma-separated in the environment, e.g. "http://localhost:3000,http://127.0.0.1:3000".
+    # NoDecode stops pydantic-settings from trying to parse the raw string as JSON.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:3000"]
+    )
+
+    # --- Database --------------------------------------------------------
+    # Application-metadata connection (role: sageboard_app). Optional in Phase 1 so the
+    # service can start without a database; /readyz reports it as not configured.
+    database_url: SecretStr | None = None
+    # Migration connection (role: sageboard_owner). On Neon this must be the DIRECT
+    # (non-pooled) endpoint: migrations rely on session state the pooler discards.
+    migration_database_url: SecretStr | None = None
+    db_pool_size: int = Field(default=5, ge=1, le=50)
+    db_max_overflow: int = Field(default=5, ge=0, le=50)
+    db_connect_timeout_s: float = Field(default=5.0, gt=0, le=60)
+
+    # --- LLM (adapter implemented in Phase 5; configuration validated now) --
+    llm_provider: LLMProvider = LLMProvider.MOCK
+    llm_model: str | None = None
+    anthropic_api_key: SecretStr | None = None
+    openai_api_key: SecretStr | None = None
+    gemini_api_key: SecretStr | None = None
+
+    # ------------------------------------------------------------------ validators
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [o.strip().rstrip("/") for o in value.split(",") if o.strip()]
+        return value
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _validate_origins(cls, origins: list[str]) -> list[str]:
+        for origin in origins:
+            if origin == "*":
+                raise ValueError(
+                    "Wildcard CORS origin is not allowed: the API uses credentialed requests."
+                )
+            if not origin.startswith(("http://", "https://")):
+                raise ValueError(f"CORS origin must include a scheme: {origin!r}")
+        return origins
+
+    @field_validator("database_url", "migration_database_url")
+    @classmethod
+    def _validate_db_url(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None or not value.get_secret_value().strip():
+            return None
+        url = value.get_secret_value()
+        if not url.startswith("postgresql+asyncpg://"):
+            raise ValueError("DATABASE_URL must use the async driver: postgresql+asyncpg://...")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_llm(self) -> Self:
+        if self.llm_provider is LLMProvider.MOCK:
+            if self.env is Environment.PRODUCTION:
+                raise ValueError("LLM_PROVIDER=mock is not allowed when ENV=production.")
+            return self
+        key_field = _PROVIDER_KEY_FIELD[self.llm_provider]
+        key: SecretStr | None = getattr(self, key_field)
+        if key is None or not key.get_secret_value().strip():
+            raise ValueError(
+                f"LLM_PROVIDER={self.llm_provider.value} requires {key_field.upper()} to be set."
+            )
+        if not self.llm_model:
+            raise ValueError(f"LLM_PROVIDER={self.llm_provider.value} requires LLM_MODEL.")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_production(self) -> Self:
+        if self.env is Environment.PRODUCTION:
+            insecure = [o for o in self.cors_origins if o.startswith("http://")]
+            if insecure:
+                raise ValueError(f"Production CORS origins must use https: {insecure}")
+        return self
+
+    # ------------------------------------------------------------------ helpers
+    @property
+    def is_production(self) -> bool:
+        return self.env is Environment.PRODUCTION
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Cached settings accessor, used as a FastAPI dependency and at startup."""
+    return Settings()

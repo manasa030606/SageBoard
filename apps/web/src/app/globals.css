@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+/*
+ * Sageboard design tokens — Phase 1 foundation (colour, type, spacing, radius, motion).
+ * Components arrive in Phase 8. Rules: no gradients, hairline borders over shadows,
+ * 4px default radius, amber is an accent only (never body text on light surfaces).
+ */
+@theme {
+  /* Colour ------------------------------------------------------------- */
+  --color-navy-950: #0e1a2b;
+  --color-navy-900: #142235;
+  --color-navy-800: #1c2b40;
+  --color-navy-600: #3a4a61;
+  --color-navy-400: #6b7890;
+
+  --color-forest-800: #183d2e;
+  --color-forest-700: #1f4d3a;
+  --color-forest-600: #2a6249;
+  --color-forest-100: #dfeae3;
+
+  --color-sage-400: #9aae97;
+  --color-sage-300: #b7c7b4;
+  --color-sage-200: #d3ddd0;
+  --color-sage-100: #e6ece3;
+
+  --color-warm-white: #faf8f3;
+  --color-paper: #ffffff;
+
+  --color-amber-600: #b7791f;
+  --color-amber-100: #f6ead3;
+
+  --color-rust-700: #9b3b2a;
+  --color-rust-100: #f4e1dc;
+
+  /* Typography --------------------------------------------------------- */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  /* Shape & motion ----------------------------------------------------- */
+  --radius-sm: 2px;
+  --radius: 4px;
+  --radius-md: 6px;
+
+  --ease-out-quiet: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    font-feature-settings: "ss02";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: var(--color-warm-white);
+    color: var(--color-navy-950);
+  }
+
+  /* Numbers in tables, metrics and code always use tabular figures. */
+  .tabular,
+  code,
+  kbd,
+  samp {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-forest-600);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

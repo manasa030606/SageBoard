@@ -1,0 +1,41 @@
+# ---- Secrets: never commit real env files (templates are allowed) ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# ---- Node / Next.js ----
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+playwright-report/
+test-results/
+.pnpm-debug.log*
+npm-debug.log*
+.vercel
+
+# ---- Local data / tooling ----
+*.log
+*.sqlite3
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
