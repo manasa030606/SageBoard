@@ -164,11 +164,17 @@ Fallback if per-dataset roles cannot be administered on the chosen plan: one `sa
 - **Error hygiene:** DB errors are mapped to user-safe messages. SQLSTATE is kept for the agent's feedback, with internal identifiers stripped (e.g. role names). No stack traces in responses.
 
 ## 8. File upload security
-- Max 25 MB (configurable), max 1,000,000 rows, max 200 columns, max 10 sheets.
-- Extension + MIME sniff + magic bytes (`PK\x03\x04` for XLSX). XLSX is opened with `openpyxl(read_only=True, data_only=True)` after a zip check on uncompressed size and ratio (reject > 100:1 or > 500 MB uncompressed). Macros/external links are ignored.
-- Files are stored under a random UUID name in a temp dir and deleted after load. The original filename is used for display only (sanitised).
-- Data loads use `COPY ... FROM STDIN` with the typed table, so cell content is never interpolated into SQL.
-- **CSV export:** cells starting with `= + - @ \t \r` are prefixed with `'` (formula-injection mitigation).
+
+**As built (Phase 3, CSV only — D28):**
+- Limits (env-configurable): 25 MB (`UPLOAD_MAX_BYTES`), 1,000,000 rows, 200 columns, 10,000 characters per cell. The size limit is enforced **while streaming** to disk, so an oversized upload never fully lands (`413 FILE_TOO_LARGE`), and the partial file is deleted.
+- Only `.csv` is accepted. Excel files get an explicit “save as CSV UTF-8” message (`415`). Content checks: NUL bytes → `BINARY_FILE`; strict UTF-8 (BOM allowed) → `ENCODING`; a strict CSV parser, so an unclosed quote is an error rather than silently swallowing the rest of the file.
+- Storage: a random 256-bit token names the file (`<token>.upload`) in a private directory (`0700`). The file is created with `O_EXCL` and mode `0600`. Tokens are regex-checked and the resolved path must stay inside the upload directory (traversal tests). The client's filename is display-only: base name kept, control characters stripped, 200 chars max.
+- Lifecycle: the file is deleted after a successful load, a failed load or dataset deletion. Unreviewed uploads older than `UPLOAD_TTL_MINUTES` (60) are swept at startup.
+- Loading: values are parsed in Python to typed objects and sent with `COPY` (asyncpg `copy_records_to_table`), so cell content is never interpolated into SQL. Table and column names are normalised and validated against `^[a-z_][a-z0-9_]{0,62}$`, then quoted.
+- The whole load (schema, role, table, COPY, grants, catalog) is one transaction. Any failure leaves no schema, role or rows behind (tested).
+
+**Planned:** XLSX (openpyxl `read_only=True, data_only=True` after a zip size/ratio check, reject > 100:1 or > 500 MB uncompressed, ≤ 10 sheets; macros and external links ignored), MIME/magic-byte sniffing, and moving ingestion to a background worker.
+- **CSV export (Phase 12):** cells starting with `= + - @ \t \r` are prefixed with `'` (formula-injection mitigation).
 
 ## 9. No code execution policy
 - The codebase has no `eval`, `exec`, `compile`, `subprocess`, `os.system` or `pickle.loads` on dynamic input. A CI check enforces this (ruff `S` rules: S102, S307, S602–S607, S301, plus a custom grep gate on `app/`).

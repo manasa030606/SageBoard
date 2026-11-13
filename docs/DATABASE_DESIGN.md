@@ -2,244 +2,403 @@
 
 | Field | Value |
 |---|---|
-| Document | DATABASE_DESIGN v0.2 |
-| Status | Approved 2026-11-12 (v0.2). Decisions: see DECISION_LOG.md |
-| Engine | PostgreSQL 16: Neon in production, Docker Compose locally (D5 final). SQLAlchemy 2.x (async, asyncpg) + Alembic |
-| Permission model | [ADR-0002](adr/0002-database-topology-and-permissions.md): base roles implemented in Phase 1 by `infra/postgres/init/001_roles.sh` |
+| Document | DATABASE_DESIGN v0.3 |
+| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13) records the Phase 3 implementation; see DECISION_LOG D26–D33 |
+| Engine | PostgreSQL 16 — Neon in production, native PostgreSQL locally (Homebrew / Postgres.app; Docker optional). SQLAlchemy 2.x async + asyncpg, Alembic |
+| Permission model | [ADR-0002](adr/0002-database-topology-and-permissions.md) — roles in `infra/postgres/init/001_roles.sh`; per-dataset schemas and reader roles in `app/ingestion/warehouse.py` |
+| Source of truth | §4 is generated from the models: `uv run python scripts/schema_reference.py` (apps/api) |
 
 ---
 
 ## 1. Logical layout
 
-| Schema | Purpose | Managed by |
-|---|---|---|
-| `app` | Product metadata: users, datasets, conversations, runs, trace, results, reports, dashboards | Alembic migrations |
-| `ds_<32-hex>` | One schema per dataset, holding the user's tables | Ingestion service at runtime |
-| `lg` | LangGraph checkpoint tables (`checkpoints`, `checkpoint_writes`, `checkpoint_blobs`) | `AsyncPostgresSaver.setup()` |
+| Schema | Holds | Managed by | Who can read it |
+|---|---|---|---|
+| `app` | Product metadata: users, connections, datasets and their catalog, conversations, messages, analysis sessions, query executions, reports | Alembic (`sageboard_owner`) | `sageboard_app` (DML only) |
+| `ds_<32 hex>` | One schema per dataset: the user's actual tables | Ingestion service at runtime (`sageboard_ingest`) | Only that dataset's reader role `ds_<hex>_r` |
+| `lg` | LangGraph checkpoints | `AsyncPostgresSaver.setup()` — **Phase 4+, not created yet** | — |
 
-Conventions:
-- PKs are `uuid` (UUIDv7, generated in the app so they're time-ordered and index-friendly).
-- `created_at` / `updated_at` are `timestamptz NOT NULL DEFAULT now()`.
-- Enums are Postgres `text` + `CHECK` constraints. That's easier to migrate than native enums; Python `StrEnum` mirrors them.
-- Soft deletes are **not** used. Deletes are hard deletes with `ON DELETE CASCADE` (privacy: FR-U3).
-- JSON payloads use `jsonb`, and each one has a matching Pydantic model in code.
+Conventions (as built):
+- Primary keys are `uuid` **v7**, generated in the app (`app/db/base.py: uuid7`), so they're time-ordered and index-friendly.
+- `created_at` / `updated_at` are `timestamptz NOT NULL DEFAULT now()`; `updated_at` is also set by the ORM on update.
+- Enumerations are `varchar` + `CHECK` constraints (cheaper to migrate than native enums).
+- Constraint and index names follow one convention (`pk_`, `fk_`, `uq_`, `ck_`, `ix_`), so migrations and error messages are predictable.
+- No soft deletes. Deletes are hard and cascade (privacy, FR-U3). Dataset deletion also drops its warehouse schema and role.
+- `jsonb` for structured payloads (column profiles, ingestion issues, report content).
 
-## 2. Entity-relationship overview
+## 2. Connections and roles
+
+| Setting | Role | Driver | Used for | Can it read dataset rows? |
+|---|---|---|---|---|
+| `DATABASE_URL` | `sageboard_app` | SQLAlchemy async (asyncpg) | All `app` metadata reads/writes | No — `permission denied` (tested) |
+| `MIGRATION_DATABASE_URL` | `sageboard_owner` | Alembic | Schema migrations only (Neon: **direct** endpoint) | Not granted |
+| `INGEST_DATABASE_URL` | `sageboard_ingest` | asyncpg pool (max 3) | `CREATE SCHEMA`, `CREATE ROLE ds_…_r`, `COPY`, catalog inspection/profiling | Owns what it creates; never runs user or agent SQL |
+| `EXECUTOR_DATABASE_URL` | `sageboard_executor` | asyncpg pool (max 5) | Previews now; validated agent SQL from Phase 4 | Only via `SET LOCAL ROLE ds_<hex>_r` inside a `READ ONLY` transaction |
+
+Every executor query runs as:
+
+```sql
+BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL ROLE ds_<hex>_r;                 -- privileges of this one dataset only
+SET LOCAL search_path = ds_<hex>;
+SET LOCAL statement_timeout = <ms>;        -- default 10 000
+<prepared statement with bind parameters>;
+COMMIT;
+```
+
+The executor role itself is `NOINHERIT` and `default_transaction_read_only = on`, so it has no privileges until it switches role. The integration tests prove each of these by having PostgreSQL refuse: writes (`ReadOnlySQLTransactionError`), other schemas (`InsufficientPrivilegeError`) and long queries (`QueryCanceledError`).
+
+All pools use `statement_cache_size=0`, which is required behind Neon's transaction-mode PgBouncer and harmless on a direct connection. Credentials live only in backend environment variables. No API response includes a DSN, host or secret (`ConnectionOut` exposes id, name, kind, status, created_at).
+
+## 3. Entity-relationship overview (as built)
 
 ```
-users 1─┬─* datasets 1─┬─* dataset_tables 1─* dataset_columns
-        │              ├─* dataset_relationships (between dataset_tables)
+users 1─┬─* database_connections 1─* datasets            (connection FK: NO ACTION, deferred)
+        ├─* datasets 1─┬─* dataset_tables 1─* dataset_columns
+        │              ├─* dataset_relationships (from/to dataset_tables)
         │              └─* ingestion_jobs
-        ├─* conversations 1─* analysis_runs 1─┬─* run_events
-        │        (dataset_id FK)               ├─* run_steps 1─* tool_calls
-        │                                      ├─* llm_calls
-        │                                      ├─* sql_queries 0..1─1 query_results
-        │                                      ├─* visualizations
-        │                                      ├─* insights 1─* insight_evidence
-        │                                      └─0..1 reports
-        ├─* reports
-        ├─* dashboard_widgets (→ sql_queries, visualizations)
-        ├─1 user_settings
-        └─* usage_counters
-audit_log (actor user_id nullable)
+        ├─* conversations 1─┬─* messages ─0..1→ analysis_sessions (SET NULL)
+        │   (dataset_id)    └─* analysis_sessions 1─* query_executions
+        ├─* query_executions   (dataset_id; analysis_session_id nullable for previews)
+        └─* reports            (analysis_session_id, dataset_id: SET NULL — reports outlive both)
 ```
 
-## 3. Table definitions (`app` schema)
+Deletion behaviour (all verified in `tests/integration/test_models.py`):
+- **Delete a user** → everything they own goes (connections, datasets, catalog, conversations, messages, sessions, executions, reports).
+- **Delete a dataset** → its catalog, ingestion jobs, conversations, sessions and executions go. Reports stay, with `dataset_id = NULL`.
+- **Delete a connection that still has datasets** → refused (`fk_datasets_connection_id_database_connections`). The check is deferred to commit so a user deletion can cascade through both paths in one statement (migration 0003).
 
-### 3.1 Identity
+## 4. Table reference (`app` schema, generated)
+
 **users**
+
 | Column | Type | Constraints |
 |---|---|---|
 | id | uuid | PK |
-| email | citext | UNIQUE NOT NULL |
-| password_hash | text | NOT NULL (argon2id) |
-| full_name | text | NOT NULL |
-| is_active | boolean | DEFAULT true |
-| last_login_at | timestamptz | |
-| created_at, updated_at | timestamptz | |
+| email | varchar(320) | NOT NULL |
+| full_name | varchar(200) | NOT NULL |
+| password_hash | text |  |
+| is_active | boolean | NOT NULL, DEFAULT true |
+| created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
+| updated_at | timestamp with time zone | NOT NULL, DEFAULT now() |
 
-**user_settings** (1:1)
-| Column | Type | Notes |
-|---|---|---|
-| user_id | uuid | PK, FK users ON DELETE CASCADE |
-| clarification_mode | text | CHECK in ('ask','assume') DEFAULT 'ask' |
-| default_row_limit | int | DEFAULT 1000, CHECK 10..10000 |
-| auto_charts | boolean | DEFAULT true |
-| timezone | text | DEFAULT 'Asia/Kolkata' |
-| updated_at | timestamptz | |
+- UNIQUE INDEX `uq_users_email_lower` (lower(email))
 
-**refresh_tokens** (if the refresh-token rotation in D3 is adopted)
-| id uuid PK | user_id FK | token_hash text UNIQUE | expires_at | revoked_at | created_at | user_agent text |
+**database_connections**
 
-### 3.2 Datasets
-**datasets**
-| Column | Type | Notes |
+| Column | Type | Constraints |
 |---|---|---|
 | id | uuid | PK |
-| owner_id | uuid | FK users ON DELETE CASCADE, indexed |
-| name | text | NOT NULL; UNIQUE (owner_id, name) |
-| description | text | |
-| source_type | text | CHECK in ('upload_csv','upload_xlsx','sample','postgres_external') |
-| schema_name | text | UNIQUE NOT NULL, `ds_<hex>`; CHECK `~ '^ds_[0-9a-f]{32}$'` |
-| reader_role | text | `ds_<hex>_r` |
-| status | text | CHECK in ('pending_review','loading','ready','failed','deleting') |
-| status_reason | text | |
-| version | int | DEFAULT 1; incremented on reload (reports record the version they used) |
-| total_rows | bigint | |
-| size_bytes | bigint | |
-| created_at, updated_at | | |
+| owner_id | uuid | FK → users.id ON DELETE CASCADE, NOT NULL |
+| name | varchar(120) | NOT NULL |
+| kind | varchar(32) | NOT NULL |
+| status | varchar(16) | NOT NULL, DEFAULT active |
+| host | varchar(255) |  |
+| port | integer |  |
+| database_name | varchar(128) |  |
+| secret_ref | varchar(255) |  |
+| created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
+| updated_at | timestamp with time zone | NOT NULL, DEFAULT now() |
+
+- CHECK `ck_database_connections_kind`: `kind IN ('internal_warehouse', 'postgres_external')`
+- CHECK `ck_database_connections_port`: `port IS NULL OR (port > 0 AND port < 65536)`
+- CHECK `ck_database_connections_status`: `status IN ('active', 'disabled', 'error')`
+- UNIQUE `uq_database_connections_owner_id_name` (owner_id, name)
+- INDEX `ix_database_connections_owner_id` (owner_id)
+
+**datasets**
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | uuid | PK |
+| owner_id | uuid | FK → users.id ON DELETE CASCADE, NOT NULL |
+| connection_id | uuid | FK → database_connections.id ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED, NOT NULL |
+| name | varchar(120) | NOT NULL |
+| description | text |  |
+| source_type | varchar(16) | NOT NULL |
+| file_name | varchar(255) |  |
+| schema_name | varchar(40) | NOT NULL, UNIQUE |
+| reader_role | varchar(40) | NOT NULL, UNIQUE |
+| status | varchar(16) | NOT NULL |
+| status_reason | text |  |
+| version | integer | NOT NULL, DEFAULT 1 |
+| total_rows | bigint |  |
+| size_bytes | bigint |  |
+| created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
+| updated_at | timestamp with time zone | NOT NULL, DEFAULT now() |
+
+- CHECK `ck_datasets_reader_role`: `reader_role ~ '^ds_[0-9a-f]{32}_r$'`
+- CHECK `ck_datasets_schema_name`: `schema_name ~ '^ds_[0-9a-f]{32}$'`
+- CHECK `ck_datasets_source_type`: `source_type IN ('demo', 'upload_csv')`
+- CHECK `ck_datasets_status`: `status IN ('pending_review', 'loading', 'ready', 'failed', 'deleting')`
+- UNIQUE `uq_datasets_owner_id_name` (owner_id, name)
+- UNIQUE `uq_datasets_reader_role` (reader_role)
+- UNIQUE `uq_datasets_schema_name` (schema_name)
+- INDEX `ix_datasets_connection_id` (connection_id)
+- INDEX `ix_datasets_owner_id_created_at` (owner_id, created_at DESC)
 
 **dataset_tables**
-| id uuid PK | dataset_id FK CASCADE | table_name text (safe ident) | display_name text | description text | row_count bigint | UNIQUE(dataset_id, table_name) |
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | uuid | PK |
+| dataset_id | uuid | FK → datasets.id ON DELETE CASCADE, NOT NULL |
+| table_name | varchar(63) | NOT NULL |
+| display_name | varchar(255) | NOT NULL |
+| description | text |  |
+| row_count | bigint | NOT NULL |
+| primary_key | jsonb | NOT NULL |
+
+- UNIQUE `uq_dataset_tables_dataset_id_table_name` (dataset_id, table_name)
+- INDEX `ix_dataset_tables_dataset_id` (dataset_id)
 
 **dataset_columns**
-| Column | Type | Notes |
+
+| Column | Type | Constraints |
 |---|---|---|
 | id | uuid | PK |
-| table_id | uuid | FK dataset_tables CASCADE |
-| column_name | text | safe ident; UNIQUE(table_id, column_name) |
-| display_name | text | original header |
-| ordinal | int | |
-| data_type | text | CHECK in ('integer','bigint','numeric','boolean','date','timestamptz','text') |
-| inferred_type | text | what inference suggested (for audit when overridden) |
-| description | text | user glossary (FR-D6) |
-| semantic_role | text | nullable CHECK in ('identifier','measure','dimension','time', 'currency') — inferred, editable |
-| profile | jsonb | {null_pct, distinct_count, min, max, mean?, top_values:[{v,c}]≤10} |
-| is_sensitive | boolean | DEFAULT false — if true, sample values are never sent to the LLM (SECURITY §6) |
+| table_id | uuid | FK → dataset_tables.id ON DELETE CASCADE, NOT NULL |
+| column_name | varchar(63) | NOT NULL |
+| display_name | varchar(255) | NOT NULL |
+| ordinal | integer | NOT NULL |
+| data_type | varchar(16) | NOT NULL |
+| inferred_type | varchar(16) |  |
+| is_nullable | boolean | NOT NULL |
+| is_primary_key | boolean | NOT NULL |
+| semantic_role | varchar(16) |  |
+| description | text |  |
+| is_sensitive | boolean | NOT NULL, DEFAULT false |
+| profile | jsonb | NOT NULL |
 
-**dataset_relationships** (join paths for the agent)
-| id | dataset_id FK | from_table_id FK | from_column_id FK | to_table_id FK | to_column_id FK | origin text CHECK ('declared','inferred') | confidence numeric(3,2) |
+- CHECK `ck_dataset_columns_data_type`: `data_type IN ('integer', 'bigint', 'numeric', 'boolean', 'date', 'timestamptz', 'text')`
+- CHECK `ck_dataset_columns_semantic_role`: `semantic_role IS NULL OR semantic_role IN ('identifier', 'measure', 'dimension', 'time', 'currency')`
+- UNIQUE `uq_dataset_columns_table_id_column_name` (table_id, column_name)
+- INDEX `ix_dataset_columns_table_id` (table_id)
+
+**dataset_relationships**
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | uuid | PK |
+| dataset_id | uuid | FK → datasets.id ON DELETE CASCADE, NOT NULL |
+| from_table_id | uuid | FK → dataset_tables.id ON DELETE CASCADE, NOT NULL |
+| from_column | varchar(63) | NOT NULL |
+| to_table_id | uuid | FK → dataset_tables.id ON DELETE CASCADE, NOT NULL |
+| to_column | varchar(63) | NOT NULL |
+| origin | varchar(16) | NOT NULL |
+| constraint_name | varchar(63) |  |
+
+- CHECK `ck_dataset_relationships_origin`: `origin IN ('declared', 'inferred')`
+- UNIQUE `uq_dataset_relationships_dataset_id_from_table_id_from_column_to_table_id_to_column` (dataset_id, from_table_id, from_column, to_table_id, to_column)
+- INDEX `ix_dataset_relationships_dataset_id` (dataset_id)
+- INDEX `ix_dataset_relationships_from_table_id` (from_table_id)
+- INDEX `ix_dataset_relationships_to_table_id` (to_table_id)
 
 **ingestion_jobs**
-| id | dataset_id FK CASCADE | status ('queued','running','succeeded','failed') | file_name | file_size | rows_loaded | rows_rejected | rejected_samples jsonb (≤50) | warnings jsonb | started_at | finished_at | error text |
 
-### 3.3 Conversations and runs
-**conversations**
-| id | owner_id FK CASCADE | dataset_id FK datasets CASCADE | title text | created_at | updated_at | INDEX(owner_id, updated_at DESC) |
-
-**analysis_runs**
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid | PK — also the LangGraph `thread_id` |
-| conversation_id | uuid | FK CASCADE |
-| owner_id | uuid | FK users CASCADE (denormalised for owner filtering) |
-| dataset_id | uuid | FK datasets CASCADE |
-| dataset_version | int | |
-| question | text | NOT NULL, ≤ 2000 chars (CHECK) |
-| status | text | CHECK in ('queued','running','awaiting_input','succeeded','partial','failed','cancelled') |
-| termination_reason | text | mirrors AgentState |
-| understanding | jsonb | QueryUnderstanding |
-| plan | jsonb | AnalysisPlan |
-| final_summary | text | |
-| error_code, error_message | text | user-safe |
-| llm_calls, sql_executions, tokens_in, tokens_out | int | |
-| duration_ms | int | |
-| idempotency_key | text | UNIQUE(owner_id, idempotency_key) |
-| started_at, finished_at, created_at | timestamptz | |
-| search_tsv | tsvector | GENERATED from question; GIN index (history search) |
-Indexes: (owner_id, created_at DESC), (status) partial WHERE status IN ('queued','running').
-
-**run_events** (append-only, SSE replay source)
-| run_id FK CASCADE | seq int | type text | node text | payload jsonb | created_at | **PK(run_id, seq)** |
-
-**run_steps** (one row per node execution)
-| id | run_id FK | node text | plan_step_id text NULL | attempt int | status ('started','completed','failed') | input_summary jsonb | output jsonb | error_class text | latency_ms | started_at | finished_at |
-
-**tool_calls**
-| id | run_id FK | run_step_id FK | tool_name | invoked_by ('llm','node') | arguments jsonb | result_summary jsonb | status | latency_ms | created_at |
-
-**llm_calls**
-| id | run_id FK | run_step_id FK | provider | model | prompt_name | prompt_version | input_tokens | output_tokens | latency_ms | status ('ok','invalid_output','error') | retry_count | created_at |
-
-Prompt/response bodies are **not** stored by default. A `DEBUG_STORE_PROMPTS` env flag (dev only) writes them to `llm_payloads` with a 7-day TTL.
-
-**sql_queries**
-| Column | Type | Notes |
+| Column | Type | Constraints |
 |---|---|---|
 | id | uuid | PK |
-| run_id | uuid | FK CASCADE (nullable for widget refreshes → `origin`) |
-| owner_id, dataset_id | uuid | |
-| origin | text | ('agent','widget_refresh','rerun') |
-| plan_step_id | text | |
-| attempt | int | |
-| generated_sql | text | raw LLM output |
-| normalized_sql | text | Guard output (executed form) |
-| sql_fingerprint | text | sha256 of normalised SQL (dedupe/repeat detection) |
-| guard_status | text | ('accepted','rejected') |
-| guard_violations | jsonb | [{code, message}] |
-| explain_cost | numeric | |
-| exec_status | text | ('not_run','ok','error','timeout','cancelled') |
-| exec_error_code | text | SQLSTATE |
-| exec_error_message | text | sanitised |
-| row_count | int | |
-| truncated | boolean | |
-| exec_ms | int | |
-| created_at | | INDEX(owner_id, created_at DESC) |
+| dataset_id | uuid | FK → datasets.id ON DELETE CASCADE, NOT NULL |
+| status | varchar(16) | NOT NULL |
+| file_name | varchar(255) |  |
+| file_size | bigint |  |
+| upload_token | varchar(64) | UNIQUE |
+| rows_total | bigint |  |
+| rows_loaded | bigint |  |
+| rows_rejected | bigint |  |
+| issues | jsonb | NOT NULL |
+| inferred_schema | jsonb | NOT NULL |
+| error | text |  |
+| started_at | timestamp with time zone |  |
+| finished_at | timestamp with time zone |  |
+| created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
 
-**query_results**
-| id | sql_query_id FK UNIQUE CASCADE | columns jsonb [{name, pg_type}] | rows jsonb (≤ default_row_limit; the full fetched result up to the 10k cap is stored compressed) | row_count | byte_size | expires_at (D19 retention) |
+- CHECK `ck_ingestion_jobs_status`: `status IN ('pending', 'running', 'succeeded', 'failed')`
+- UNIQUE `uq_ingestion_jobs_upload_token` (upload_token)
+- INDEX `ix_ingestion_jobs_dataset_id` (dataset_id)
 
-Storage note: results ≤ 10k rows × typical widths fit comfortably in jsonb. Larger results are truncated and flagged. The retention job deletes expired results that aren't referenced by a report or widget.
+**conversations**
 
-### 3.4 Outputs
-**visualizations**
-| id | run_id FK CASCADE | sql_query_id FK | spec jsonb (ChartSpec) | created_at |
+| Column | Type | Constraints |
+|---|---|---|
+| id | uuid | PK |
+| owner_id | uuid | FK → users.id ON DELETE CASCADE, NOT NULL |
+| dataset_id | uuid | FK → datasets.id ON DELETE CASCADE, NOT NULL |
+| title | varchar(200) | NOT NULL |
+| created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
+| updated_at | timestamp with time zone | NOT NULL, DEFAULT now() |
 
-**insights**
-| id | run_id FK CASCADE | ordinal | headline | detail | category | confidence | verification ('verified','rejected') | rejection_reason | verify_round int |
+- INDEX `ix_conversations_dataset_id` (dataset_id)
+- INDEX `ix_conversations_owner_id_updated_at` (owner_id, updated_at DESC)
 
-Rejected insights are stored too, for traceability; the UI shows only verified ones by default.
+**messages**
 
-**insight_evidence**
-| id | insight_id FK CASCADE | kind ('fact','cell','rows') | fact jsonb (ComputedFact snapshot) | sql_query_id FK | row_indices int[] | column_name |
+| Column | Type | Constraints |
+|---|---|---|
+| id | uuid | PK |
+| conversation_id | uuid | FK → conversations.id ON DELETE CASCADE, NOT NULL |
+| analysis_session_id | uuid | FK → analysis_sessions.id ON DELETE SET NULL |
+| role | varchar(16) | NOT NULL |
+| content | text | NOT NULL |
+| created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
+
+- CHECK `ck_messages_role`: `role IN ('user', 'assistant', 'system')`
+- INDEX `ix_messages_analysis_session_id` (analysis_session_id)
+- INDEX `ix_messages_conversation_id_created_at` (conversation_id, created_at)
+
+**analysis_sessions**
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | uuid | PK |
+| conversation_id | uuid | FK → conversations.id ON DELETE CASCADE, NOT NULL |
+| owner_id | uuid | FK → users.id ON DELETE CASCADE, NOT NULL |
+| dataset_id | uuid | FK → datasets.id ON DELETE CASCADE, NOT NULL |
+| dataset_version | integer | NOT NULL |
+| question | text | NOT NULL |
+| status | varchar(16) | NOT NULL |
+| termination_reason | varchar(32) |  |
+| understanding | jsonb |  |
+| plan | jsonb |  |
+| final_summary | text |  |
+| error_code | varchar(64) |  |
+| error_message | text |  |
+| llm_calls | integer | NOT NULL, DEFAULT 0 |
+| sql_executions | integer | NOT NULL, DEFAULT 0 |
+| tokens_in | integer | NOT NULL, DEFAULT 0 |
+| tokens_out | integer | NOT NULL, DEFAULT 0 |
+| duration_ms | integer |  |
+| started_at | timestamp with time zone |  |
+| finished_at | timestamp with time zone |  |
+| created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
+
+- CHECK `ck_analysis_sessions_question_length`: `char_length(question) BETWEEN 1 AND 2000`
+- CHECK `ck_analysis_sessions_status`: `status IN ('queued', 'running', 'awaiting_input', 'succeeded', 'partial', 'failed', 'cancelled')`
+- INDEX `ix_analysis_sessions_active` (status) WHERE `status IN ('queued', 'running', 'awaiting_input')`
+- INDEX `ix_analysis_sessions_conversation_id` (conversation_id)
+- INDEX `ix_analysis_sessions_dataset_id` (dataset_id)
+- INDEX `ix_analysis_sessions_owner_id_created_at` (owner_id, created_at DESC)
+
+**query_executions**
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | uuid | PK |
+| analysis_session_id | uuid | FK → analysis_sessions.id ON DELETE CASCADE |
+| owner_id | uuid | FK → users.id ON DELETE CASCADE, NOT NULL |
+| dataset_id | uuid | FK → datasets.id ON DELETE CASCADE, NOT NULL |
+| origin | varchar(16) | NOT NULL |
+| plan_step_id | varchar(16) |  |
+| attempt | integer | NOT NULL |
+| generated_sql | text |  |
+| executed_sql | text |  |
+| sql_fingerprint | varchar(64) |  |
+| guard_status | varchar(16) | NOT NULL |
+| guard_violations | jsonb | NOT NULL |
+| exec_status | varchar(16) | NOT NULL |
+| error_code | varchar(16) |  |
+| error_message | text |  |
+| row_count | bigint |  |
+| truncated | boolean | NOT NULL |
+| exec_ms | integer |  |
+| created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
+
+- CHECK `ck_query_executions_exec_status`: `exec_status IN ('not_run', 'ok', 'error', 'timeout', 'cancelled')`
+- CHECK `ck_query_executions_guard_status`: `guard_status IN ('accepted', 'rejected', 'not_applicable')`
+- CHECK `ck_query_executions_origin`: `origin IN ('agent', 'preview', 'widget_refresh', 'rerun')`
+- INDEX `ix_query_executions_analysis_session_id` (analysis_session_id)
+- INDEX `ix_query_executions_dataset_id` (dataset_id)
+- INDEX `ix_query_executions_owner_id_created_at` (owner_id, created_at DESC)
 
 **reports**
-| Column | Type | Notes |
+
+| Column | Type | Constraints |
 |---|---|---|
 | id | uuid | PK |
-| owner_id | uuid | FK CASCADE |
-| run_id | uuid | FK analysis_runs ON DELETE SET NULL (report survives run deletion) |
-| title | text | |
-| summary | text | |
-| summary_edited_by_user | boolean | |
-| content | jsonb | immutable snapshot: sections, charts specs, table data (capped), insights + evidence, SQL appendix, dataset name/version |
-| created_at, updated_at | | |
+| owner_id | uuid | FK → users.id ON DELETE CASCADE, NOT NULL |
+| analysis_session_id | uuid | FK → analysis_sessions.id ON DELETE SET NULL |
+| dataset_id | uuid | FK → datasets.id ON DELETE SET NULL |
+| title | varchar(200) | NOT NULL |
+| summary | text | NOT NULL |
+| summary_edited_by_user | boolean | NOT NULL |
+| content | jsonb | NOT NULL |
+| created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
+| updated_at | timestamp with time zone | NOT NULL, DEFAULT now() |
 
-**dashboard_widgets**
-| id | owner_id FK CASCADE | dataset_id FK CASCADE | title | kind ('chart','kpi','table') | sql_query_id FK (source query) | stored_sql text (normalised SQL snapshot) | spec jsonb | position jsonb {x,y,w,h} | last_refreshed_at | last_result_id FK query_results | last_error text |
+- INDEX `ix_reports_analysis_session_id` (analysis_session_id)
+- INDEX `ix_reports_dataset_id` (dataset_id)
+- INDEX `ix_reports_owner_id_created_at` (owner_id, created_at DESC)
 
-### 3.5 Operations
-**usage_counters** | owner_id | day date | runs int | llm_tokens int | PK(owner_id, day) |
+## 5. Dataset schemas (`ds_<hex>`)
 
-**audit_log** | id | actor_id NULL | action ('login','login_failed','dataset.create','dataset.delete','guard.reject','account.delete',…) | target_type | target_id | ip inet | meta jsonb | created_at | INDEX(created_at), INDEX(actor_id) |
+Lifecycle (`app/ingestion/warehouse.py`, all in **one** ingest transaction — PostgreSQL DDL is transactional, so a failure leaves nothing behind):
 
-## 4. Dataset schemas (`ds_<hex>`)
+```sql
+CREATE SCHEMA "ds_<hex>";
+REVOKE ALL ON SCHEMA "ds_<hex>" FROM PUBLIC;
+CREATE ROLE "ds_<hex>_r" NOLOGIN NOINHERIT;
+CREATE TABLE "ds_<hex>"."<table>" (...);          -- PK if declared, else _row_id identity
+COPY ... (asyncpg copy_records_to_table, 5 000-row batches)
+-- demo only: ALTER TABLE ... ADD CONSTRAINT fk_<table>_<col> FOREIGN KEY ...; CREATE INDEX ix_<table>_<col> ...; ANALYZE
+GRANT USAGE ON SCHEMA "ds_<hex>" TO "ds_<hex>_r";
+GRANT SELECT ON ALL TABLES IN SCHEMA "ds_<hex>" TO "ds_<hex>_r";
+GRANT "ds_<hex>_r" TO sageboard_executor;          -- PG16: CREATEROLE grants ADMIN on roles it created
+```
 
-- Table and column names come from `ingestion/identifiers.py`: lowercase snake_case, ASCII only, reserved words get a `_col` suffix, max 63 bytes, collisions de-duplicated with `_2`, `_3`.
-- Each table gets a surrogate `_row_id bigint GENERATED ALWAYS AS IDENTITY` (useful for stable evidence row references). It's hidden from the agent's schema context.
-- Created by the `sageboard_ingest` role, which owns the schema. After load:
-  ```sql
-  CREATE ROLE ds_<hex>_r NOLOGIN;
-  GRANT USAGE ON SCHEMA ds_<hex> TO ds_<hex>_r;
-  GRANT SELECT ON ALL TABLES IN SCHEMA ds_<hex> TO ds_<hex>_r;
-  GRANT ds_<hex>_r TO sageboard_executor;   -- executor can SET ROLE into it
-  ANALYZE ds_<hex>.<each table>;
-  ```
-- Indexes: ingestion creates btree indexes on inferred identifier/FK columns and date columns (cap 5 per table) to keep agent queries fast.
-- Deletion: `DROP SCHEMA ds_<hex> CASCADE; DROP ROLE ds_<hex>_r;` inside a transaction, then delete the metadata.
+- **Names.** Uploaded headers go through `normalize_identifier`: ASCII snake_case, camelCase split, `ß→ss`, accents stripped, `c_` prefix for a leading digit, `_col` suffix for reserved words, ≤ 63 bytes. Names that collide after normalisation are **rejected** with a message naming both headers (no silent `_2` suffixes). The original header is kept as `display_name`.
+- **Surrogate key.** Uploaded tables without a primary key get `_row_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY`. It gives previews a stable order and later gives evidence a row reference, and it is hidden from the catalog and the agent.
+- **Identifier safety.** Schema, table, column and role names are validated against `^[a-z_][a-z0-9_]{0,62}$` (and the `ds_` patterns) and then double-quoted (`app/db/identifiers.py`). Values are never interpolated: they go through bind parameters or COPY.
+- **Deletion.** `DROP SCHEMA … CASCADE; DROP ROLE …` in a transaction, then the metadata row. Tests assert that the schema and role are gone.
 
-## 5. Sample dataset (bundled, FR-D7)
+## 6. Demo dataset — “E-commerce demo”
 
-`retail_demo`: `customers (≈2k)`, `regions (8)`, `products (≈150)`, `orders (≈25k, 2024-01..2025-12)`, `order_items (≈70k)`, `returns (≈2k)`. It is generated by a seeded, deterministic script (`packages/eval-datasets/generate_retail.py`) with planted, documented patterns (seasonality, one under-performing region, a pricing anomaly). The eval set (TESTING_STRATEGY §7) has known answers because of this.
+Generated by `app/seed/ecommerce.py` (deterministic, seed `20261113`), loaded by `uv run python -m app.seed` (`--scale small|standard`, `--replace`, `--csv-out DIR`).
 
-Each user gets their own copy (an isolated `ds_` schema) when they first sign up. That keeps the isolation model uniform with uploads.
+| Table | Standard scale rows | Key columns |
+|---|---|---|
+| customers | 3 000 | customer_id PK; region, segment, signup_date; first_name/last_name/email (**sensitive**) |
+| products | 160 | product_id PK; sku, category, unit_price, is_active, launched_on |
+| orders | 26 082 | order_id PK; customer_id → customers; order_date (timestamptz), status, channel, shipping_fee |
+| order_items | 48 141 | order_item_id PK; order_id → orders; product_id → products; quantity, unit_price, discount |
+| payments | 27 833 | payment_id PK; order_id → orders; method, status (captured/failed/voided/refunded), amount, paid_at |
 
-## 6. Migrations and lifecycle
-- Alembic manages `app` only (`include_schemas`, with a filter excluding `ds_%` and `lg`). It runs as `sageboard_owner` over `MIGRATION_DATABASE_URL`, which must be Neon's **direct** endpoint. The version table is `app.alembic_version`. Baseline revision `0001` landed in Phase 1; application tables start in Phase 2.
-- Migration 0001 creates the `app` schema, extensions (`citext`, `pgcrypto`) and base roles. In managed environments roles may need to be created out-of-band by the owner account (documented in the deploy runbook).
-- Retention job (daily, in-process scheduler at startup or a platform cron): delete `query_results` past `expires_at` (default 30 days) that aren't referenced by reports or widgets, delete `run_events` older than 30 days for finished runs, and keep `analysis_runs`/`sql_queries` rows (small) for history.
+The window is Nov 2024 – Oct 2026, across six US regions and six categories. Built-in, documented patterns give later evaluation known answers: seasonality, a Midwest slowdown from Q3 2026, channel and segment mixes, refunds and failed payments. There is deliberately **no cost/margin data**, so the agent must say it can't compute profit. Real FKs and indexes are created, so the catalog reports declared relationships.
 
-## 7. Representative queries (shape check)
-- History list: `SELECT ... FROM app.analysis_runs WHERE owner_id=$1 AND ($2::text IS NULL OR search_tsv @@ plainto_tsquery($2)) ORDER BY created_at DESC LIMIT 25` with keyset cursor on `(created_at, id)`.
-- SSE replay: `SELECT seq, type, payload FROM app.run_events WHERE run_id=$1 AND seq > $2 ORDER BY seq`.
-- Run detail: run + steps + sql_queries + insights in 4 indexed queries (no N+1 across attempts).
+## 7. Schema catalog (metadata for SQL generation)
+
+`app/services/catalog.py` rebuilds the catalog from the **live** PostgreSQL catalog after every load. It never trusts the CSV header alone.
+
+| Recorded | Where | Notes |
+|---|---|---|
+| Tables, row counts, descriptions | `dataset_tables` | Exact counts after load |
+| Columns, ordinal, type, nullability, PK flag | `dataset_columns` | `inferred_type` kept when the user overrode it |
+| Primary keys | `dataset_tables.primary_key` (jsonb list) | From `pg_constraint` |
+| Foreign keys / relationships | `dataset_relationships` (`origin = declared`) | From `pg_constraint` |
+| Semantic role | `dataset_columns.semantic_role` | identifier / measure / dimension / time / currency (heuristic, editable later) |
+| Profile | `dataset_columns.profile` | null %, distinct count, min/max, top values (≤ 10 when ≤ 50 distinct) or 5 examples |
+| Sensitivity | `dataset_columns.is_sensitive` | By name (email, phone, names, address, IDs, …) or by value shape (all e-mail addresses). **Sensitive columns get counts only — no samples, no min/max.** Owners can toggle it (PATCH). Turning it on erases stored samples |
+
+`GET /datasets/{id}/schema` serves it at two levels. `summary` gives tables, descriptions and counts, for the understanding step (ADR-0007). `full` gives columns, types, keys, FKs, relationships and privacy-controlled samples, for SQL generation. `include_samples=false` strips all values.
+
+## 8. Migrations
+
+| Revision | Content |
+|---|---|
+| 0001 | `app` schema, extensions, baseline (Phase 1) |
+| 0002 | All 12 application tables, FKs, CHECKs, indexes (Phase 3) |
+| 0003 | `datasets.connection_id` FK → `NO ACTION DEFERRABLE INITIALLY DEFERRED` (found by the cascade test) |
+
+Alembic manages `app` only. `ds_%` schemas are excluded by `include_object`, and the version table is `app.alembic_version`. Tests run `downgrade base → upgrade head` and `alembic check` (models == migrations) against a dedicated `sageboard_test` database.
+
+## 9. Planned tables (not built yet)
+
+These stay as designed in v0.2 and arrive with the phase that needs them. Nothing in Phase 3 depends on them.
+
+| Table(s) | Phase | Note |
+|---|---|---|
+| `run_events`, `run_steps`, `tool_calls`, `llm_calls` | 4–5 (agent) | Agent trace. `analysis_sessions` is the as-built name for v0.2's `analysis_runs` |
+| `query_results` | 4 | Stored result sets. `query_executions` (as built) is v0.2's `sql_queries` |
+| `visualizations`, `insights`, `insight_evidence` | 6–7 | |
+| `dashboard_widgets` | 8 | |
+| `user_settings`, `refresh_tokens`, `audit_log`, `usage_counters` | Auth & hardening | `users.password_hash` is nullable until auth lands |

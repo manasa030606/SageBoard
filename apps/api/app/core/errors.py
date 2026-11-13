@@ -106,3 +106,49 @@ def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(StarletteHTTPException, _http_error_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
     app.add_exception_handler(Exception, _unhandled_error_handler)
+
+
+class ValidationFailedError(AppError):
+    status_code = HTTPStatus.UNPROCESSABLE_ENTITY
+    code = "VALIDATION_ERROR"
+    message = "The request could not be processed."
+
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, details=details)
+        if code:
+            self.code = code
+
+
+class FileTooLargeError(AppError):
+    status_code = HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+    code = "FILE_TOO_LARGE"
+    message = "The file is too large."
+
+
+class UnsupportedFileError(AppError):
+    status_code = HTTPStatus.UNSUPPORTED_MEDIA_TYPE
+    code = "UNSUPPORTED_FILE"
+    message = "This file type is not supported."
+
+
+class ConflictError(AppError):
+    status_code = HTTPStatus.CONFLICT
+    code = "CONFLICT"
+    message = "The request conflicts with the current state."
+
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, details=details)
+        if code:
+            self.code = code

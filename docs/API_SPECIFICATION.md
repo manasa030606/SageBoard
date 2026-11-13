@@ -2,8 +2,8 @@
 
 | Field | Value |
 |---|---|
-| Document | API_SPECIFICATION v0.2 |
-| Status | Approved 2026-11-12 (v0.2). Decisions: see DECISION_LOG.md |
+| Document | API_SPECIFICATION v0.3 |
+| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13): §3 Datasets updated to the Phase 3 implementation. Decisions: see DECISION_LOG.md |
 | Base URL | `https://<api-host>/api/v1` |
 | Format | JSON (UTF-8); `multipart/form-data` for uploads; `text/event-stream` for run events |
 | Source of truth | FastAPI-generated OpenAPI 3.1 at `/api/v1/openapi.json`. The frontend types are generated from it. |
@@ -58,40 +58,84 @@ Cursor-based: `?limit=25&cursor=<opaque>` → `{ "items": [...], "next_cursor": 
 
 `User = {id, email, full_name, created_at}`
 
-## 3. Datasets
+## 3. Datasets — *implemented in Phase 3*
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/datasets` | List the user's datasets → `Page<DatasetSummary>` |
-| POST | `/datasets/uploads` | multipart: `file`, `name`, `description?`, `sheet?` → `201 {dataset: Dataset(status=pending_review), inferred: InferredSchema, warnings: string[]}` |
-| POST | `/datasets/{id}/finalize` | `{columns: [{table, column, data_type, display_name?}]}` overrides → `202 {dataset, job_id}` |
-| GET | `/datasets/{id}` | `Dataset` with tables and columns (profiles included) |
-| PATCH | `/datasets/{id}` | `{name?, description?}` |
-| PATCH | `/datasets/{id}/tables/{tableId}` | `{description?}` |
-| PATCH | `/datasets/{id}/columns/{columnId}` | `{description?, semantic_role?, is_sensitive?}` |
-| GET | `/datasets/{id}/tables/{tableId}/preview?limit=50` | `{columns, rows}` — fixed parameterised query; no user SQL |
-| GET | `/datasets/{id}/jobs/{jobId}` | `IngestionJob` |
-| DELETE | `/datasets/{id}` | `202` → status `deleting`; cascades conversations/runs/widgets |
+All paths are under `/api/v1`. Until authentication lands, the caller is the seeded demo user (D27). Another user's dataset always answers `404 NOT_FOUND`, never `403`, so the API doesn't reveal which IDs exist. Endpoints not listed here (`PATCH /datasets/{id}`, table PATCH, `/jobs/{id}`) remain **planned**.
+
+| Method | Path | Request | Success | Errors (`error.code`) |
+|---|---|---|---|---|
+| GET | `/datasets` | — | `200 {items: DatasetSummary[]}` (newest first) | 503 |
+| POST | `/datasets/uploads` | multipart: `file` (.csv), `name?` (≤120), `description?` (≤2000) | `201 UploadReview` — file analysed and stored privately; **nothing loaded**; dataset `pending_review` | 409 `NAME_TAKEN`, 413 `FILE_TOO_LARGE`, 415 `UNSUPPORTED_FILE`, 422 `CSV_INVALID` (`details.issues[]`) |
+| POST | `/datasets/{id}/finalize` | `{column_types: {column: type}}` (optional overrides) | `200 DatasetDetail` (`ready`) — synchronous load | 409 `DATASET_NOT_PENDING` / `UPLOAD_EXPIRED`, 422 `VALIDATION_ERROR` (bad override) / `INGESTION_FAILED` (>5 % bad rows; dataset → `failed`, nothing left in the warehouse) |
+| GET | `/datasets/{id}` | — | `200 DatasetDetail` (tables, columns, profiles) | 404 |
+| GET | `/datasets/{id}/schema` | `level=summary\|full` (default full), `include_samples=true\|false` | `200 SchemaCatalog` | 404 |
+| GET | `/datasets/{id}/tables/{table}/preview` | `limit` 1–1000 (capped by `PREVIEW_MAX_ROWS`, 100), `offset` ≥0, `reveal_sensitive=false` | `200 PreviewResponse` | 404 (table not in catalog), 409 `DATASET_NOT_READY`, 503 |
+| PATCH | `/datasets/{id}/columns/{columnId}` | `{description?, is_sensitive?}` | `200 ColumnOut` | 404 |
+| DELETE | `/datasets/{id}` | — | `204` — warehouse schema + reader role dropped, metadata cascades | 404 |
+| GET | `/connections` | — | `200 ConnectionOut[]` | — |
+
+Response shapes (from the served OpenAPI document, `/api/v1/openapi.json`):
 
 ```ts
-type Dataset = {
+type DatasetSummary = {
   id: string; name: string; description: string | null;
-  source_type: "upload_csv" | "upload_xlsx" | "sample";
+  source_type: "demo" | "upload_csv"; file_name: string | null;
   status: "pending_review" | "loading" | "ready" | "failed" | "deleting";
-  status_reason: string | null; version: number;
-  total_rows: number | null; size_bytes: number | null;
-  tables: DatasetTable[]; created_at: string; updated_at: string;
+  status_reason: string | null;            // user-safe failure reason
+  version: number; total_rows: number | null; size_bytes: number | null;
+  table_count: number; created_at: string; updated_at: string;
 };
-type DatasetTable = { id: string; table_name: string; display_name: string;
-  description: string | null; row_count: number; columns: DatasetColumn[] };
-type DatasetColumn = { id: string; column_name: string; display_name: string;
-  data_type: "integer"|"bigint"|"numeric"|"boolean"|"date"|"timestamptz"|"text";
-  inferred_type: string; description: string | null;
-  semantic_role: "identifier"|"measure"|"dimension"|"time"|"currency"|null;
-  is_sensitive: boolean;
-  profile: { null_pct: number; distinct_count: number; min: string|null; max: string|null;
-             top_values: { value: string; count: number }[] } | null };
+type DatasetDetail = DatasetSummary & { tables: TableOut[] };
+type TableOut = { id: string; table_name: string; display_name: string; description: string | null;
+  row_count: number; primary_key: string[]; columns: ColumnOut[] };
+type ColumnType = "integer" | "bigint" | "numeric" | "boolean" | "date" | "timestamptz" | "text";
+type ColumnOut = { id: string; column_name: string; display_name: string; ordinal: number;
+  data_type: ColumnType; inferred_type: ColumnType | null; is_nullable: boolean; is_primary_key: boolean;
+  semantic_role: "identifier" | "measure" | "dimension" | "time" | "currency" | null;
+  description: string | null; is_sensitive: boolean;
+  profile: { null_pct?: number; distinct_count?: number; min?: string; max?: string;
+             top_values?: { value: string; count: number }[]; examples?: string[] } };  // value fields absent when sensitive
+
+type UploadReview = {
+  dataset: DatasetSummary; row_count: number;        // rows that will load
+  rejected_count: number; rejected_samples: { line: number; reason: string }[];  // ≤ 20 shown
+  columns: { name: string; display_name: string; inferred_type: ColumnType;
+             missing_count: number; sample_values: string[] }[];
+  issues: { severity: "error" | "warning"; code: string; message: string;
+            column: string | null; line: number | null }[];
+};
+
+type PreviewResponse = { table: string; columns: { name: string; data_type: ColumnType; is_sensitive: boolean }[];
+  rows: unknown[][];          // JSON-safe: numerics → number (or string if ≥ 1e15), dates → ISO strings
+  limit: number; offset: number; has_more: boolean;
+  masked_columns: string[];   // values shown as "«redacted»"
+  exec_ms: number };
+
+type SchemaCatalog = { dataset_id: string; dataset_name: string; dataset_version: number;
+  level: "summary" | "full";
+  tables: TableSchema[] | { name: string; description: string | null; row_count: number; column_count: number }[];
+  relationships: { from_table: string; from_column: string; to_table: string; to_column: string;
+                   origin: "declared" | "inferred" }[] };
+type TableSchema = { name: string; description: string | null; row_count: number; primary_key: string[];
+  foreign_keys: { column: string; references_table: string; references_column: string }[];
+  columns: { name: string; display_name: string; data_type: ColumnType; nullable: boolean;
+    is_primary_key: boolean; semantic_role: string | null; description: string | null;
+    is_sensitive: boolean; null_pct: number | null; distinct_count: number | null;
+    min: string | null; max: string | null;      // null when sensitive
+    sample_values: string[];                     // ≤ 10; [] when sensitive or include_samples=false
+    samples_redacted: boolean }[] };
+
+type ConnectionOut = { id: string; name: string; kind: "internal_warehouse" | "postgres_external";
+  status: "active" | "disabled" | "error"; created_at: string };    // never host, user or secret
 ```
+
+CSV validation codes (in `issues[]` or `error.details.issues[]`):
+- Errors: `EMPTY_FILE`, `BINARY_FILE`, `ENCODING`, `NO_HEADER`, `BLANK_COLUMN_NAME`, `DUPLICATE_COLUMN` (exact or after normalisation), `TOO_MANY_COLUMNS`, `TOO_MANY_ROWS`, `NO_ROWS`, `CELL_TOO_LARGE`, `MALFORMED_CSV` (unbalanced quotes, or > 5 % ragged rows).
+- Warnings: `EMPTY_COLUMN`, `HIGH_MISSING` (> 50 % missing), `ROWS_REJECTED` (≤ 5 % ragged rows, skipped).
+
+Values treated as missing: empty, `NA`, `N/A`, `NULL`, `None`, `NaN`, `-`, `#N/A` (case-insensitive, trimmed).
+
+Readiness (`GET /readyz`) now reports `database`, `ingest_database`, `executor_database` and `llm_config`. It is `ready` only when all four are `ok`.
 
 ## 4. Conversations & runs
 

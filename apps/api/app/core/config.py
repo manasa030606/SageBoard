@@ -7,9 +7,11 @@ misconfigured deployment fails fast instead of failing on the first request.
 
 from __future__ import annotations
 
+import tempfile
 from enum import StrEnum
 from functools import lru_cache
-from typing import Annotated, Self
+from pathlib import Path
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -71,9 +73,32 @@ class Settings(BaseSettings):
     # Migration connection (role: sageboard_owner). On Neon this must be the DIRECT
     # (non-pooled) endpoint: migrations rely on session state the pooler discards.
     migration_database_url: SecretStr | None = None
+    # Analytical credentials — separate from the application role (ADR-0002).
+    # Ingestion (role: sageboard_ingest) creates per-dataset schemas and loads data.
+    ingest_database_url: SecretStr | None = None
+    # Read-only executor (role: sageboard_executor, NOINHERIT): may only SET ROLE into a
+    # dataset's reader role inside a READ ONLY transaction.
+    executor_database_url: SecretStr | None = None
     db_pool_size: int = Field(default=5, ge=1, le=50)
     db_max_overflow: int = Field(default=5, ge=0, le=50)
     db_connect_timeout_s: float = Field(default=5.0, gt=0, le=60)
+
+    # --- Uploads & ingestion ---------------------------------------------
+    upload_max_bytes: int = Field(default=25 * 1024 * 1024, ge=1024, le=200 * 1024 * 1024)
+    upload_max_rows: int = Field(default=1_000_000, ge=1)
+    upload_max_columns: int = Field(default=200, ge=1, le=1600)
+    # Directory for in-flight uploads. Files get random names and are deleted after use.
+    upload_dir: Path = Field(
+        default_factory=lambda: Path(tempfile.gettempdir()) / "sageboard-uploads"
+    )
+    upload_ttl_minutes: int = Field(default=60, ge=1)
+    preview_max_rows: int = Field(default=100, ge=1, le=1000)
+    executor_statement_timeout_ms: int = Field(default=10_000, ge=100, le=120_000)
+
+    # --- Identity (until authentication lands) ------------------------------
+    # "demo": every request acts as the seeded demo user. Refused when ENV=production.
+    auth_mode: Literal["demo"] = "demo"
+    demo_user_email: str = "demo@sageboard.local"
 
     # --- LLM (adapter implemented in Phase 5; configuration validated now) --
     llm_provider: LLMProvider = LLMProvider.MOCK
@@ -102,7 +127,9 @@ class Settings(BaseSettings):
                 raise ValueError(f"CORS origin must include a scheme: {origin!r}")
         return origins
 
-    @field_validator("database_url", "migration_database_url")
+    @field_validator(
+        "database_url", "migration_database_url", "ingest_database_url", "executor_database_url"
+    )
     @classmethod
     def _validate_db_url(cls, value: SecretStr | None) -> SecretStr | None:
         if value is None or not value.get_secret_value().strip():
@@ -134,6 +161,8 @@ class Settings(BaseSettings):
             insecure = [o for o in self.cors_origins if o.startswith("http://")]
             if insecure:
                 raise ValueError(f"Production CORS origins must use https: {insecure}")
+            if self.auth_mode == "demo":
+                raise ValueError("AUTH_MODE=demo is not allowed when ENV=production.")
         return self
 
     # ------------------------------------------------------------------ helpers

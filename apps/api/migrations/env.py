@@ -16,11 +16,13 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
+import app.db.models  # noqa: F401  (registers every table on Base.metadata)
 from app.core.config import get_settings
+from app.db.base import Base
 
 APP_SCHEMA = "app"
 config = context.config
-target_metadata = None  # set to Base.metadata when ORM models arrive (Phase 2)
+target_metadata = Base.metadata
 
 
 def _url() -> str:

@@ -13,6 +13,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.1",
     "asyncpg>=0.30",
     "alembic>=1.14",
+    "python-multipart>=0.0.33",
 ]
 
 [dependency-groups]
@@ -51,10 +52,16 @@ select = [
 ]
 ignore = [
     "PLR0913",       # many args is fine for settings/factories
+    "E501",          # ruff format owns line length; long user-facing messages stay unsplit
 ]
+# User-facing messages use real typography on purpose (’ – × − « »).
+allowed-confusables = ["’", "–", "×", "−", "«", "»"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106", "PLR2004"]  # asserts, fake secrets, magic values
+"tests/**" = ["S101", "S105", "S106", "PLR2004", "S608", "ASYNC240"]  # asserts, fake secrets, magic values, test SQL, tmp files
+# The synthetic generator is a table of business probabilities; naming each one adds noise.
+# Its RNG is seeded for reproducibility, never used for security.
+"app/seed/ecommerce.py" = ["PLR2004", "S311"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -64,7 +71,7 @@ quote-style = "double"
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["app", "tests"]
+files = ["app", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
 module = ["asyncpg.*"]
@@ -84,3 +91,6 @@ filterwarnings = ["error::DeprecationWarning:app.*"]
 [tool.coverage.run]
 source = ["app"]
 branch = true
+# SQLAlchemy's async layer runs ORM code inside greenlets; without this, coverage
+# under-reports everything that executes during a database round trip.
+concurrency = ["greenlet", "thread"]

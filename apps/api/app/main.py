@@ -19,7 +19,8 @@ from app.core.config import Settings, get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import REQUEST_ID_HEADER, RequestContextMiddleware
-from app.db.session import create_engine
+from app.db.engines import Databases, open_databases
+from app.ingestion.uploads import sweep_stale
 
 log = get_logger(__name__)
 
@@ -30,20 +31,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.db_engine = create_engine(settings)
+        databases = await open_databases(settings)
+        app.state.databases = databases
+        removed = sweep_stale(settings.upload_dir, settings.upload_ttl_minutes * 60)
         log.info(
             "startup",
             env=settings.env.value,
             version=settings.app_version,
-            database_configured=app.state.db_engine is not None,
+            database_configured=databases.app_engine is not None,
+            ingest_configured=databases.ingest is not None,
+            executor_configured=databases.executor is not None,
+            stale_uploads_removed=removed,
             llm_provider=settings.llm_provider.value,
             cors_origins=settings.cors_origins,
         )
         try:
             yield
         finally:
-            if app.state.db_engine is not None:
-                await app.state.db_engine.dispose()
+            await databases.close()
             log.info("shutdown")
 
     app = FastAPI(
@@ -56,8 +61,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
     )
     app.state.settings = settings
-    # Default so the dependency works even before lifespan runs (e.g. some test clients).
-    app.state.db_engine = None
+    # Default so dependencies work even before lifespan runs (e.g. some test clients).
+    app.state.databases = Databases(app_engine=None, sessions=None, ingest=None, executor=None)
 
     # Middleware order: the last added runs first. CORS must wrap everything so that
     # error responses also carry CORS headers.

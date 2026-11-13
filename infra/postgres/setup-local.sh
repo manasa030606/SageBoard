@@ -11,7 +11,8 @@
 #   4. runs infra/postgres/init/001_roles.sh (roles, hardening, `app` schema)
 #
 # Usage (from the repository root):
-#   bash infra/postgres/setup-local.sh
+#   bash infra/postgres/setup-local.sh                 # database from infra/.env (sageboard)
+#   bash infra/postgres/setup-local.sh --db sageboard_test   # separate database for tests
 #
 # Optional overrides:
 #   PG_SUPERUSER  admin role to connect as (default: your macOS username,
@@ -20,6 +21,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DB_OVERRIDE=""
+if [[ "${1:-}" == "--db" && -n "${2:-}" ]]; then
+  [[ "$2" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] || { echo "✗ Invalid database name: $2" >&2; exit 1; }
+  DB_OVERRIDE="$2"
+fi
 ENV_FILE="$ROOT/infra/.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -51,7 +57,7 @@ fi
 export PGHOST="${PGHOST:-localhost}"
 export PGPORT="${PGPORT:-${POSTGRES_PORT:-5432}}"
 SUPERUSER="${PG_SUPERUSER:-$(whoami)}"
-DB="${POSTGRES_DB:-sageboard}"
+DB="${DB_OVERRIDE:-${POSTGRES_DB:-sageboard}}"
 
 # --- check the server ----------------------------------------------------------
 if ! psql -U "$SUPERUSER" -d postgres -tAc "SELECT 1" >/dev/null 2>&1; then

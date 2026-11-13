@@ -92,7 +92,7 @@ Zip bomb XLSX, 30 MB CSV, 250 columns, path-traversal filename `../../x.csv`, NU
 Login rate limit and lockout, refresh-token rotation + reuse detection, CSRF missing/mismatched → 403, cookie flags.
 
 ## 6. Integration tests
-Postgres via `docker-compose` service in CI (`postgres:16`), migrations applied once per session, each test in a transaction or a fresh schema.
+As built (Phase 3): tests in `apps/api/tests/integration/` run against a **dedicated** PostgreSQL database (`sageboard_test` locally, the ephemeral service DB in CI) using the four real role URLs (`SAGEBOARD_TEST_DATABASE_URL`, `_INGEST_`, `_EXECUTOR_`, `_MIGRATION_`). `test_00_migrations.py` runs first and performs a full `downgrade base → upgrade head`. Tests clean up what they create, so the suite is repeatable. Without the URLs they are skipped, and CI fails the job if anything is skipped. Coverage uses `concurrency = ["greenlet", "thread"]` so async ORM code is measured.
 
 | Area | Tests |
 |---|---|

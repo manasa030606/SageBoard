@@ -49,7 +49,7 @@ async def executor_conn() -> AsyncIterator[asyncpg.Connection]:
 async def test_app_role_can_read_app_metadata(app_conn: asyncpg.Connection) -> None:
     assert await app_conn.fetchval("SELECT current_user") == "sageboard_app"
     # Granted through default privileges on tables created by sageboard_owner.
-    assert await app_conn.fetchval("SELECT version_num FROM app.alembic_version") == "0001"
+    assert await app_conn.fetchval("SELECT version_num FROM app.alembic_version") == "0003"
 
 
 async def test_app_role_cannot_create_schema_objects(app_conn: asyncpg.Connection) -> None:
@@ -82,6 +82,13 @@ async def test_executor_cannot_read_app_metadata(executor_conn: asyncpg.Connecti
 async def test_executor_cannot_switch_to_privileged_roles(
     executor_conn: asyncpg.Connection,
 ) -> None:
-    for role in ("sageboard_app", "sageboard_owner", "sageboard_ingest", "postgres"):
+    # Superusers differ by install (`postgres` in Docker/Linux, your macOS user name with
+    # Homebrew, `neondb_owner` on Neon), so test whichever ones actually exist.
+    superusers = [
+        r["rolname"]
+        for r in await executor_conn.fetch("SELECT rolname FROM pg_roles WHERE rolsuper")
+    ]
+    assert superusers, "expected at least one superuser role"
+    for role in ("sageboard_app", "sageboard_owner", "sageboard_ingest", *superusers):
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
             await executor_conn.execute(f'SET ROLE "{role}"')

@@ -41,6 +41,8 @@ jobs:
       MIGRATION_DATABASE_URL: postgresql+asyncpg://sageboard_owner:ci-owner@localhost:5432/sageboard
       SAGEBOARD_TEST_DATABASE_URL: postgresql+asyncpg://sageboard_app:ci-app@localhost:5432/sageboard
       SAGEBOARD_TEST_EXECUTOR_DATABASE_URL: postgresql+asyncpg://sageboard_executor:ci-executor@localhost:5432/sageboard
+      SAGEBOARD_TEST_INGEST_DATABASE_URL: postgresql+asyncpg://sageboard_ingest:ci-ingest@localhost:5432/sageboard
+      SAGEBOARD_TEST_MIGRATION_DATABASE_URL: postgresql+asyncpg://sageboard_owner:ci-owner@localhost:5432/sageboard
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -59,4 +61,7 @@ jobs:
       - name: Migrate
         run: uv run alembic upgrade head
       - name: Tests (unit + integration)
-        run: uv run pytest --cov --cov-report=term-missing
+        # Integration tests skip when their URLs are missing; in CI that would hide failures.
+        run: |
+          uv run pytest --cov --cov-report=term-missing -rs | tee pytest.out
+          if grep -q "SKIPPED" pytest.out; then echo "::error::Tests were skipped in CI"; exit 1; fi
