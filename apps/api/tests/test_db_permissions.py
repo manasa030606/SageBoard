@@ -49,7 +49,7 @@ async def executor_conn() -> AsyncIterator[asyncpg.Connection]:
 async def test_app_role_can_read_app_metadata(app_conn: asyncpg.Connection) -> None:
     assert await app_conn.fetchval("SELECT current_user") == "sageboard_app"
     # Granted through default privileges on tables created by sageboard_owner.
-    assert await app_conn.fetchval("SELECT version_num FROM app.alembic_version") == "0003"
+    assert await app_conn.fetchval("SELECT version_num FROM app.alembic_version") == "0004"
 
 
 async def test_app_role_cannot_create_schema_objects(app_conn: asyncpg.Connection) -> None:

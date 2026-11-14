@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
+from app.auth.ratelimit import RateLimiter
 from app.core.config import Settings, get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging, get_logger
@@ -63,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     # Default so dependencies work even before lifespan runs (e.g. some test clients).
     app.state.databases = Databases(app_engine=None, sessions=None, ingest=None, executor=None)
+    app.state.rate_limiter = RateLimiter()
 
     # Middleware order: the last added runs first. CORS must wrap everything so that
     # error responses also carry CORS headers.
@@ -73,7 +75,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=True,  # cookie auth arrives in Phase 2
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "X-Request-ID", "X-CSRF-Token", "Idempotency-Key"],
-        expose_headers=[REQUEST_ID_HEADER],
+        expose_headers=[REQUEST_ID_HEADER, "Retry-After"],
         max_age=600,
     )
 
@@ -82,4 +84,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
-app = create_app()
+_app: FastAPI | None = None
+
+
+def __getattr__(name: str) -> FastAPI:
+    """``uvicorn app.main:app`` builds the app on first access, not at import time.
+
+    Importing ``create_app`` (tests, scripts) therefore never reads the developer's
+    ``.env`` or fails on its missing secrets.
+    """
+    global _app  # noqa: PLW0603 - one cached application per process
+    if name != "app":
+        raise AttributeError(name)
+    if _app is None:
+        _app = create_app()
+    return _app

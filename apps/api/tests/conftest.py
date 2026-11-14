@@ -13,6 +13,9 @@ from app.main import create_app
 ALLOWED_ORIGIN = "http://localhost:3000"
 
 
+TEST_JWT_SECRET = "test-only-secret-" + "x" * 40
+
+
 def make_settings(**overrides: Any) -> Settings:
     """Settings built only from explicit values: never reads the developer's .env."""
     base: dict[str, Any] = {
@@ -22,6 +25,7 @@ def make_settings(**overrides: Any) -> Settings:
         "cors_origins": [ALLOWED_ORIGIN],
         "database_url": None,
         "llm_provider": "mock",
+        "jwt_secret": TEST_JWT_SECRET,
     }
     base.update(overrides)
     return Settings(_env_file=None, **base)

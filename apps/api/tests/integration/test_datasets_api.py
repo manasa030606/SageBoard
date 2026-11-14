@@ -14,9 +14,8 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.db.base import uuid7
 from app.db.identifiers import new_dataset_identifiers
-from app.main import create_app
 from app.seed.demo import export_csv
-from tests.integration.conftest import PgUrls, fetch, run
+from tests.integration.conftest import PgUrls, fetch, run, signed_in
 
 pytestmark = pytest.mark.integration
 API = "/api/v1"
@@ -99,9 +98,8 @@ def test_non_csv_is_rejected(api: TestClient) -> None:
     assert "CSV UTF-8" in response.json()["error"]["message"]
 
 
-def test_file_size_limit(pg_settings: Callable[..., Settings], seed: Callable[..., Any]) -> None:
-    seed()
-    with TestClient(create_app(pg_settings(upload_max_bytes=1024))) as client:
+def test_file_size_limit(pg_settings: Callable[..., Settings]) -> None:
+    with signed_in(pg_settings(upload_max_bytes=1024), with_demo=False) as client:
         response = upload(client, "a,b\n" + "1,2\n" * 400)
     assert response.status_code == 413
     assert response.json()["error"]["code"] == "FILE_TOO_LARGE"

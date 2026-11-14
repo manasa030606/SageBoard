@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -15,9 +18,10 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, uuid7
+from app.db.base import Base, CreatedAtMixin, TimestampMixin, uuid7
 
 
 class User(TimestampMixin, Base):
@@ -35,6 +39,7 @@ class User(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     connections: Mapped[list[DatabaseConnection]] = relationship(
         back_populates="owner", cascade="all, delete-orphan"
@@ -72,3 +77,43 @@ class DatabaseConnection(TimestampMixin, Base):
     secret_ref: Mapped[str | None] = mapped_column(String(255))
 
     owner: Mapped[User] = relationship(back_populates="connections")
+
+
+class RefreshToken(CreatedAtMixin, Base):
+    """One issued refresh token. Only its SHA-256 hash is stored.
+
+    Tokens rotate on every use. All tokens from one login share a ``family_id``; if a
+    token that was already rotated is presented again (a sign it was stolen), the whole
+    family is revoked.
+    """
+
+    __tablename__ = "refresh_tokens"
+    __table_args__ = (Index("ix_refresh_tokens_family_id", "family_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid7)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    family_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    replaced_by_id: Mapped[uuid.UUID | None] = mapped_column()
+    user_agent: Mapped[str | None] = mapped_column(String(300))
+
+
+class AuditLog(CreatedAtMixin, Base):
+    """Security-relevant events: sign-ins, failures, token reuse, dataset create/delete."""
+
+    __tablename__ = "audit_log"
+    __table_args__ = (Index("ix_audit_log_created_at", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid7)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_type: Mapped[str | None] = mapped_column(String(32))
+    target_id: Mapped[str | None] = mapped_column(String(64))
+    ip: Mapped[str | None] = mapped_column(INET)
+    meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

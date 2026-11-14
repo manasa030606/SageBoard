@@ -11,13 +11,14 @@ import asyncio
 from typing import Any
 
 from alembic import context
+from pydantic import SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 import app.db.models  # noqa: F401  (registers every table on Base.metadata)
-from app.core.config import get_settings
 from app.db.base import Base
 
 APP_SCHEMA = "app"
@@ -25,8 +26,19 @@ config = context.config
 target_metadata = Base.metadata
 
 
+class MigrationSettings(BaseSettings):
+    """Only what migrations need, so `alembic` runs without app secrets (JWT, LLM keys)."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    migration_database_url: SecretStr | None = None
+
+
+# Alembic executes this file outside sys.modules, so resolve the annotation explicitly.
+MigrationSettings.model_rebuild(_types_namespace={"SecretStr": SecretStr})
+
+
 def _url() -> str:
-    url = get_settings().migration_database_url
+    url = MigrationSettings().migration_database_url
     if url is None:
         raise RuntimeError("MIGRATION_DATABASE_URL is not set (owner role, direct connection).")
     return url.get_secret_value()

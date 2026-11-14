@@ -8,10 +8,11 @@ from app.db.models.datasets import (
     DatasetTable,
     IngestionJob,
 )
-from app.db.models.identity import DatabaseConnection, User
+from app.db.models.identity import AuditLog, DatabaseConnection, RefreshToken, User
 
 __all__ = [
     "AnalysisSession",
+    "AuditLog",
     "Conversation",
     "DatabaseConnection",
     "Dataset",
@@ -21,6 +22,7 @@ __all__ = [
     "IngestionJob",
     "Message",
     "QueryExecution",
+    "RefreshToken",
     "Report",
     "User",
 ]

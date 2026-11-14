@@ -34,7 +34,6 @@ from app.core.logging import get_logger
 from app.db.engines import Databases
 from app.db.identifiers import new_dataset_identifiers, qualified, quote_ident
 from app.db.models import (
-    DatabaseConnection,
     Dataset,
     DatasetColumn,
     DatasetTable,
@@ -63,12 +62,14 @@ from app.ingestion.warehouse import (
     grant_reader,
     provision_schema,
 )
+from app.seed.demo import provision_demo
+from app.services import audit
 from app.services.catalog import rebuild_catalog
+from app.services.connections import get_or_create_internal_connection
 
 log = get_logger(__name__)
 
 MASK = "«redacted»"
-INTERNAL_CONNECTION_NAME = "Sageboard warehouse"
 LOAD_BATCH = 5_000
 
 
@@ -84,24 +85,6 @@ def _require(pool: Any, name: str) -> Any:
             f"The {name} database connection is not configured.", details={"connection": name}
         )
     return pool
-
-
-async def get_or_create_internal_connection(
-    session: AsyncSession, owner: User
-) -> DatabaseConnection:
-    found = await session.scalar(
-        select(DatabaseConnection).where(
-            DatabaseConnection.owner_id == owner.id, DatabaseConnection.kind == "internal_warehouse"
-        )
-    )
-    if found:
-        return found
-    connection = DatabaseConnection(
-        owner_id=owner.id, name=INTERNAL_CONNECTION_NAME, kind="internal_warehouse"
-    )
-    session.add(connection)
-    await session.flush()
-    return connection
 
 
 class DatasetService:
@@ -298,6 +281,15 @@ class DatasetService:
                 )
                 job.finished_at = datetime.now(UTC)
                 job.upload_token = None
+                audit.record(
+                    self.session,
+                    "dataset.create",
+                    actor_id=owner.id,
+                    target_type="dataset",
+                    target_id=dataset.id,
+                    source="upload_csv",
+                    rows=loaded,
+                )
                 await self.session.commit()
         except Exception as exc:
             await self.session.rollback()
@@ -427,8 +419,63 @@ class DatasetService:
                 await drop_schema(conn, dataset.schema_name, dataset.reader_role)
         for job in dataset.jobs:
             uploads.discard(self.settings.upload_dir, job.upload_token)
+        audit.record(
+            self.session,
+            "dataset.delete",
+            actor_id=owner.id,
+            target_type="dataset",
+            target_id=dataset.id,
+            name=dataset.name,
+        )
         await self.session.delete(dataset)
         await self.session.commit()
+
+    # ------------------------------------------------------------------ metadata
+    async def update(
+        self, owner: User, dataset_id: uuid.UUID, *, name: str | None, description: str | None
+    ) -> Dataset:
+        dataset = await self.get(owner, dataset_id)
+        if name is not None:
+            cleaned = " ".join(name.split())[:120]
+            if not cleaned:
+                raise ValidationFailedError("Enter a name.", code="INVALID_NAME")
+            if cleaned != dataset.name:
+                await self._ensure_name_free(owner, cleaned)
+                dataset.name = cleaned
+        if description is not None:
+            dataset.description = description.strip()[:2000] or None
+        await self.session.commit()
+        return await self.get(owner, dataset_id)
+
+    async def update_table(
+        self, owner: User, dataset_id: uuid.UUID, table_id: uuid.UUID, *, description: str | None
+    ) -> DatasetTable:
+        dataset = await self.get(owner, dataset_id)
+        table = next((t for t in dataset.tables if t.id == table_id), None)
+        if table is None:
+            raise NotFoundError("Table not found.")
+        if description is not None:
+            table.description = description.strip()[:1000] or None
+        await self.session.commit()
+        return table
+
+    async def provision_demo(self, owner: User, *, replace: bool) -> tuple[Dataset, bool]:
+        """Load the sample e-commerce dataset into the owner's own isolated schema."""
+        ingest = _require(self.dbs.ingest, "ingest")
+        result = await provision_demo(
+            self.session, ingest, owner, scale=self.settings.demo_dataset_scale, replace=replace
+        )
+        if result.created:
+            audit.record(
+                self.session,
+                "dataset.create",
+                actor_id=owner.id,
+                target_type="dataset",
+                target_id=result.dataset.id,
+                source="demo",
+            )
+            await self.session.commit()
+        return await self.get(owner, result.dataset.id), result.created
 
     # ------------------------------------------------------------------ preview
     async def preview(

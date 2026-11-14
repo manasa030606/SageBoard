@@ -6,7 +6,7 @@ import type { ColumnType } from "@/types/domain";
  * authoritative parsing and loading happen server-side (ingestion, later phase).
  */
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
-export const ACCEPTED_EXTENSIONS = [".csv", ".xlsx"] as const;
+export const ACCEPTED_EXTENSIONS = [".csv"] as const;
 
 export interface PreviewColumn {
   name: string;
@@ -23,8 +23,10 @@ export interface CsvPreview {
 
 export function validateUpload(file: { name: string; size: number }): string | null {
   const lower = file.name.toLowerCase();
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xls"))
+    return "Excel files aren’t supported yet. In Excel choose File → Save As → “CSV UTF-8”, then upload that file.";
   if (!ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext)))
-    return "Only .csv and .xlsx files are supported.";
+    return "Only .csv files are supported.";
   if (file.size === 0) return "This file is empty.";
   if (file.size > MAX_UPLOAD_BYTES)
     return `This file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The limit is 25 MB.`;

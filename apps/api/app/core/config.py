@@ -43,6 +43,9 @@ _PROVIDER_KEY_FIELD: dict[LLMProvider, str] = {
 }
 
 
+MIN_JWT_SECRET_BYTES = 32
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -93,12 +96,28 @@ class Settings(BaseSettings):
     )
     upload_ttl_minutes: int = Field(default=60, ge=1)
     preview_max_rows: int = Field(default=100, ge=1, le=1000)
+    # Size of the sample dataset each user can load from the Data page.
+    demo_dataset_scale: Literal["small", "standard"] = "standard"
     executor_statement_timeout_ms: int = Field(default=10_000, ge=100, le=120_000)
 
-    # --- Identity (until authentication lands) ------------------------------
-    # "demo": every request acts as the seeded demo user. Refused when ENV=production.
-    auth_mode: Literal["demo"] = "demo"
+    # --- Authentication ------------------------------------------------------
+    # "session": real accounts (argon2id passwords, JWT access cookie + rotating refresh
+    # cookie, CSRF double-submit). "demo": every request acts as the seeded demo user —
+    # local development only; refused when ENV=production.
+    auth_mode: Literal["session", "demo"] = "session"
     demo_user_email: str = "demo@sageboard.local"
+    jwt_secret: SecretStr | None = None
+    access_token_minutes: int = Field(default=15, ge=1, le=120)
+    refresh_token_days: int = Field(default=14, ge=1, le=90)
+    # Cookies. Same-site deployments (web and API on one registrable domain) use "lax".
+    # Cross-site (e.g. *.vercel.app + *.onrender.com) needs "none", which requires Secure.
+    cookie_secure: bool | None = None  # default: True in production, False otherwise
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    cookie_domain: str | None = None
+    # Per-process rate limits (single API instance, ADR-0004).
+    login_attempts_per_minute: int = Field(default=5, ge=1, le=1000)
+    registrations_per_hour: int = Field(default=10, ge=1, le=10_000)
+    uploads_per_hour: int = Field(default=20, ge=1, le=10_000)
 
     # --- LLM (adapter implemented in Phase 5; configuration validated now) --
     llm_provider: LLMProvider = LLMProvider.MOCK
@@ -163,12 +182,31 @@ class Settings(BaseSettings):
                 raise ValueError(f"Production CORS origins must use https: {insecure}")
             if self.auth_mode == "demo":
                 raise ValueError("AUTH_MODE=demo is not allowed when ENV=production.")
+            if self.cookie_secure is False:
+                raise ValueError("COOKIE_SECURE=false is not allowed when ENV=production.")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_auth(self) -> Self:
+        if self.auth_mode == "session":
+            secret = self.jwt_secret.get_secret_value() if self.jwt_secret else ""
+            if len(secret.encode()) < MIN_JWT_SECRET_BYTES:
+                raise ValueError(
+                    f"AUTH_MODE=session requires JWT_SECRET of at least {MIN_JWT_SECRET_BYTES} bytes. "
+                    'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
+                )
+        if self.cookie_samesite == "none" and not self.secure_cookies:
+            raise ValueError("COOKIE_SAMESITE=none requires secure cookies (COOKIE_SECURE=true).")
         return self
 
     # ------------------------------------------------------------------ helpers
     @property
     def is_production(self) -> bool:
         return self.env is Environment.PRODUCTION
+
+    @property
+    def secure_cookies(self) -> bool:
+        return self.is_production if self.cookie_secure is None else self.cookie_secure
 
 
 @lru_cache

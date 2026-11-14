@@ -58,6 +58,7 @@ Environment: PostgreSQL 16 (native) with the real roles from `infra/postgres/ini
 | `uv run pytest -m "not integration"` (no database) | 148 passed |
 | `uv run pytest -m integration` | 55 passed |
 | CI path simulated: DB bootstrapped by the role script at revision 0001 → `alembic upgrade head` → full suite | 203 passed, 0 skipped |
+| **Owner's Mac** (macOS, Homebrew PostgreSQL 16.15, Python 3.13.18), 2026-11-14 | **203 passed** (after fix 7 below) |
 | Same suite run twice in a row | Both green; test DB left with only the demo dataset (no orphaned schemas or roles) |
 | Web (`pnpm typecheck`, `lint`, `test`) | Clean; 55 tests passed (no frontend changes) |
 
@@ -78,6 +79,7 @@ Environment: PostgreSQL 16 (native) with the real roles from `infra/postgres/ini
 4. **camelCase headers collapsed** (`customerName` → `customername`). The normaliser now splits camelCase and PascalCase.
 5. **Primary keys came back empty.** asyncpg returns PostgreSQL's `"char"` type as bytes. Fix: explicit `::text` casts in the catalog query.
 6. **Coverage under-reported** async ORM code (57 % → 88 % for the dataset service once measured correctly). Fix: coverage `concurrency = ["greenlet", "thread"]`.
+7. **A Phase 1 permission test assumed a `postgres` role.** Homebrew names the superuser after the macOS user, so the test failed on the owner's Mac with "role does not exist". It now tests every superuser that actually exists (`pg_roles.rolsuper`).
 
 ## New concepts (short mentor notes)
 

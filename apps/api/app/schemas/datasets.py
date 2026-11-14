@@ -174,3 +174,35 @@ class ConnectionOut(BaseModel):
     kind: str
     status: str
     created_at: datetime
+
+
+class DatasetPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+
+
+class TablePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    description: str | None = Field(default=None, max_length=1000)
+
+
+class IngestionJobOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    status: Literal["pending", "running", "succeeded", "failed"]
+    file_name: str | None
+    file_size: int | None
+    rows_total: int | None
+    rows_loaded: int | None
+    rows_rejected: int | None
+    issues: list[dict[str, Any]]
+    error: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+
+
+class DemoProvisioned(BaseModel):
+    dataset: DatasetDetail
+    created: bool

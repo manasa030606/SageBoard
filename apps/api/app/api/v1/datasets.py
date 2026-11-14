@@ -1,40 +1,46 @@
-"""Dataset, schema, preview and connection endpoints. Thin: parse → service → schema."""
+"""Dataset, upload, metadata, schema and preview endpoints. Thin: parse → service → schema.
+
+Every route takes ``CurrentUser`` and every service query filters by its id, so another
+user's dataset is always a 404. State-changing routes are CSRF-checked (router-wide).
+"""
 
 from __future__ import annotations
 
 import uuid
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, File, Form, Query, Response, UploadFile, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 
-from app.api.deps import CurrentUser, DatasetServiceDep, SessionDep
-from app.db.models import DatabaseConnection
+from app.api.deps import CurrentUser, DatasetServiceDep, csrf_protect, upload_rate_limit
 from app.schemas.catalog import SchemaCatalog
 from app.schemas.datasets import (
     ColumnOut,
     ColumnPatch,
-    ConnectionOut,
     DatasetDetail,
     DatasetPage,
+    DatasetPatch,
     DatasetSummary,
+    DemoProvisioned,
     FinalizeRequest,
     InferredColumn,
+    IngestionJobOut,
     PreviewColumn,
     PreviewResponse,
+    TableOut,
+    TablePatch,
     UploadIssue,
     UploadReview,
 )
 from app.schemas.errors import ErrorResponse
 from app.services.schema_catalog import build_catalog
 
-router = APIRouter(tags=["datasets"])
+router = APIRouter(tags=["datasets"], dependencies=[Depends(csrf_protect)])
 ERRORS: dict[int | str, dict[str, Any]] = {
-    code: {"model": ErrorResponse} for code in (404, 409, 413, 415, 422, 503)
+    code: {"model": ErrorResponse} for code in (401, 403, 404, 409, 413, 415, 422, 429, 503)
 }
 
 
-@router.get("/datasets", response_model=DatasetPage, summary="List your datasets")
+@router.get("/datasets", response_model=DatasetPage, responses=ERRORS, summary="List your datasets")
 async def list_datasets(user: CurrentUser, service: DatasetServiceDep) -> DatasetPage:
     return DatasetPage(items=[DatasetSummary.build(d) for d in await service.list(user)])
 
@@ -45,6 +51,7 @@ async def list_datasets(user: CurrentUser, service: DatasetServiceDep) -> Datase
     status_code=status.HTTP_201_CREATED,
     responses=ERRORS,
     summary="Upload a CSV for review (nothing is loaded yet)",
+    dependencies=[Depends(upload_rate_limit())],
 )
 async def upload_dataset(
     user: CurrentUser,
@@ -174,15 +181,60 @@ async def delete_dataset(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get(
-    "/connections",
-    response_model=list[ConnectionOut],
-    summary="Your database connections (no secrets)",
+@router.post(
+    "/datasets/demo",
+    response_model=DemoProvisioned,
+    responses=ERRORS,
+    summary="Load the sample e-commerce dataset into your account (idempotent)",
 )
-async def list_connections(user: CurrentUser, session: SessionDep) -> list[ConnectionOut]:
-    rows = await session.scalars(
-        select(DatabaseConnection)
-        .where(DatabaseConnection.owner_id == user.id)
-        .order_by(DatabaseConnection.created_at)
-    )
-    return [ConnectionOut.model_validate(c) for c in rows]
+async def provision_demo_dataset(
+    user: CurrentUser, service: DatasetServiceDep, response: Response, replace: bool = False
+) -> DemoProvisioned:
+    dataset, created = await service.provision_demo(user, replace=replace)
+    if created:
+        response.status_code = status.HTTP_201_CREATED
+    return DemoProvisioned(dataset=DatasetDetail.build(dataset), created=created)
+
+
+@router.patch(
+    "/datasets/{dataset_id}",
+    response_model=DatasetDetail,
+    responses=ERRORS,
+    summary="Rename or describe a dataset",
+)
+async def patch_dataset(
+    dataset_id: uuid.UUID, body: DatasetPatch, user: CurrentUser, service: DatasetServiceDep
+) -> DatasetDetail:
+    dataset = await service.update(user, dataset_id, name=body.name, description=body.description)
+    return DatasetDetail.build(dataset)
+
+
+@router.patch(
+    "/datasets/{dataset_id}/tables/{table_id}",
+    response_model=TableOut,
+    responses=ERRORS,
+    summary="Describe a table (descriptions help the agent later)",
+)
+async def patch_table(
+    dataset_id: uuid.UUID,
+    table_id: uuid.UUID,
+    body: TablePatch,
+    user: CurrentUser,
+    service: DatasetServiceDep,
+) -> TableOut:
+    table = await service.update_table(user, dataset_id, table_id, description=body.description)
+    return TableOut.build(table)
+
+
+@router.get(
+    "/datasets/{dataset_id}/jobs",
+    response_model=list[IngestionJobOut],
+    responses=ERRORS,
+    summary="Ingestion jobs for a dataset (each upload and load attempt)",
+)
+async def list_jobs(
+    dataset_id: uuid.UUID, user: CurrentUser, service: DatasetServiceDep
+) -> list[IngestionJobOut]:
+    dataset = await service.get(user, dataset_id)
+    jobs = sorted(dataset.jobs, key=lambda j: j.created_at, reverse=True)
+    return [IngestionJobOut.model_validate(j) for j in jobs]

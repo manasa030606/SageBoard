@@ -5,6 +5,7 @@ import {
   FileText,
   History,
   LayoutDashboard,
+  LogOut,
   Menu,
   MessageSquareText,
   Settings,
@@ -12,11 +13,14 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { Suspense, useState, type ReactNode } from "react";
 
-import { Logo } from "@/components/brand/logo";
+import { Logo, LogoMark } from "@/components/brand/logo";
+import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
+import { ErrorState } from "@/components/ui/states";
 import { ToastProvider } from "@/components/ui/toast";
+import { initials, SessionProvider, useSession } from "@/features/auth/session";
 import { cn } from "@/lib/cn";
 
 interface NavItem {
@@ -34,19 +38,37 @@ const PRIMARY: NavItem[] = [
 ];
 const SECONDARY: NavItem[] = [{ href: "/app/settings", label: "Settings", icon: Settings }];
 
-function NavLinks({
+/*
+ * Instant navigation: the shell and the page render immediately (they're static).
+ * Only the active-nav highlight reads the URL, so only it sits behind a Suspense
+ * boundary. The user menu appears once the session is known. Pages fetch their own
+ * data from the API, which enforces authentication and ownership.
+ */
+function NavLinks(props: { items: NavItem[]; onNavigate?: () => void }) {
+  return (
+    <Suspense fallback={<NavList {...props} pathname={null} />}>
+      <ActiveNavList {...props} />
+    </Suspense>
+  );
+}
+
+function ActiveNavList(props: { items: NavItem[]; onNavigate?: () => void }) {
+  return <NavList {...props} pathname={usePathname()} />;
+}
+
+function NavList({
   items,
   pathname,
   onNavigate,
 }: {
   items: NavItem[];
-  pathname: string;
+  pathname: string | null;
   onNavigate?: () => void;
 }) {
   return (
     <ul className="grid gap-0.5">
       {items.map(({ href, label, icon: Icon }) => {
-        const active = pathname === href || pathname.startsWith(`${href}/`);
+        const active = pathname !== null && (pathname === href || pathname.startsWith(`${href}/`));
         return (
           <li key={href}>
             <Link
@@ -77,7 +99,7 @@ function NavLinks({
   );
 }
 
-function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-14 items-center px-4">
@@ -86,35 +108,104 @@ function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate
         </Link>
       </div>
       <nav aria-label="Main" className="flex flex-1 flex-col gap-6 px-2.5 pt-2">
-        <NavLinks items={PRIMARY} pathname={pathname} onNavigate={onNavigate} />
+        <NavLinks items={PRIMARY} onNavigate={onNavigate} />
         <div className="mt-auto grid gap-3 pb-3">
-          <NavLinks items={SECONDARY} pathname={pathname} onNavigate={onNavigate} />
+          <NavLinks items={SECONDARY} onNavigate={onNavigate} />
           <div className="rounded-sm border border-amber/40 bg-amber-100/60 px-3 py-2.5">
-            <p className="text-xs font-medium text-amber-ink">Demo data</p>
+            <p className="text-xs font-medium text-amber-ink">Sample analysis</p>
             <p className="mt-0.5 text-2xs leading-4 text-ink-2">
-              Figures come from the bundled sample dataset. Live analysis arrives in a later phase.
+              Dashboard and Analyst show recorded sample runs until the AI analyst is connected.
+              Data sources, history and reports are live.
             </p>
           </div>
-          <div className="flex items-center gap-2.5 border-t border-line px-1.5 pt-3">
-            <span
-              aria-hidden
-              className="grid size-7 place-items-center rounded-full bg-navy text-[11px] font-semibold text-warm"
-            >
-              PR
-            </span>
-            <div className="min-w-0 leading-tight">
-              <p className="truncate text-[13px] font-medium text-ink">Priya Raman</p>
-              <p className="truncate text-2xs text-ink-2">Northwind Retail</p>
-            </div>
-          </div>
+          <UserMenu />
         </div>
       </nav>
     </div>
   );
 }
 
+function UserMenu() {
+  const { user, authMode, signOut } = useSession();
+  if (!user) return null;
+  return (
+    <div className="flex items-center gap-2.5 border-t border-line px-1.5 pt-3">
+      <span
+        aria-hidden
+        className="grid size-7 shrink-0 place-items-center rounded-full bg-navy text-[11px] font-semibold text-warm"
+      >
+        {initials(user.full_name)}
+      </span>
+      <div className="min-w-0 flex-1 leading-tight">
+        <p className="truncate text-[13px] font-medium text-ink">{user.full_name}</p>
+        <p className="truncate text-2xs text-ink-2">
+          {authMode === "demo" ? "Local demo user" : user.email}
+        </p>
+      </div>
+      {authMode === "session" ? (
+        <button
+          type="button"
+          onClick={() => void signOut()}
+          className="grid size-8 shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-warm-300/60 hover:text-ink"
+          aria-label="Sign out"
+          title="Sign out"
+        >
+          <LogOut className="size-4" aria-hidden strokeWidth={1.75} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Page area. Pages render straight away (so navigation is instant and the page is part
+ * of the prerendered shell); once the session check says there is no session, or the
+ * API is unreachable, the page is replaced by a redirect or error frame.
+ */
+function SessionGate({ children }: { children: ReactNode }) {
+  const { status, error, retry } = useSession();
+  if (status === "unavailable") {
+    return (
+      <div className="mx-auto w-full max-w-md px-5 py-16">
+        <ErrorState
+          title="Sageboard can’t reach its server"
+          description={
+            error?.message ?? "The API didn’t respond. Check that the backend is running."
+          }
+          code={error?.code}
+          action={
+            <Button variant="primary" onClick={retry}>
+              Try again
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+  if (status === "unauthenticated") {
+    return (
+      <div className="grid min-h-[60dvh] place-items-center" role="status" aria-live="polite">
+        <div className="flex items-center gap-3 text-sm text-ink-2">
+          <LogoMark className="animate-pulse" />
+          Redirecting to sign in…
+        </div>
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
+  return (
+    <SessionProvider>
+      <AppFrame>
+        <SessionGate>{children}</SessionGate>
+      </AppFrame>
+    </SessionProvider>
+  );
+}
+
+function AppFrame({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -127,7 +218,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </a>
       <div className="flex min-h-dvh">
         <aside className="sticky top-0 hidden h-dvh w-[232px] shrink-0 border-r border-line bg-warm-200/70 lg:block">
-          <SidebarContent pathname={pathname} />
+          <SidebarContent />
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -159,7 +250,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         side="left"
         widthClassName="w-[280px] bg-warm"
       >
-        <SidebarContent pathname={pathname} onNavigate={() => setMenuOpen(false)} />
+        <SidebarContent onNavigate={() => setMenuOpen(false)} />
       </Drawer>
     </ToastProvider>
   );

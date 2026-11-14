@@ -38,7 +38,7 @@ from app.ingestion.warehouse import (
 )
 from app.seed.ecommerce import COLUMN_DESCRIPTIONS, SCHEMA, checksum, generate
 from app.services.catalog import rebuild_catalog
-from app.services.datasets import get_or_create_internal_connection
+from app.services.connections import get_or_create_internal_connection
 
 DEMO_DATASET_NAME = "E-commerce demo"
 DEMO_DESCRIPTION = (
@@ -87,6 +87,64 @@ async def load_demo_tables(
         await conn.execute(f"ANALYZE {qualified(schema, spec.name)}")
 
 
+async def provision_demo(
+    session: AsyncSession,
+    ingest: asyncpg.Pool,
+    user: User,
+    *,
+    scale: str = "standard",
+    replace: bool = False,
+    seed: int = 20261113,
+) -> SeedResult:
+    """Give ``user`` their own copy of the demo dataset (own schema and reader role).
+
+    Idempotent: a ready copy is returned as-is unless ``replace``. Commits on success.
+    """
+    existing = await session.scalar(
+        select(Dataset).where(Dataset.owner_id == user.id, Dataset.name == DEMO_DATASET_NAME)
+    )
+    if existing and existing.status == "ready" and not replace:
+        await session.commit()
+        return SeedResult(user, existing, False, {}, None)
+    if existing:
+        if existing.status != "pending_review":
+            async with ingest.acquire() as conn, conn.transaction():
+                await drop_schema(conn, existing.schema_name, existing.reader_role)
+        await session.delete(existing)
+        await session.flush()
+
+    connection = await get_or_create_internal_connection(session, user)
+    schema, role = new_dataset_identifiers()
+    dataset = Dataset(
+        owner_id=user.id,
+        connection_id=connection.id,
+        name=DEMO_DATASET_NAME,
+        description=DEMO_DESCRIPTION,
+        source_type="demo",
+        schema_name=schema,
+        reader_role=role,
+        status="loading",
+    )
+    session.add(dataset)
+    await session.flush()
+
+    data = await asyncio.to_thread(generate, scale, seed)
+    async with ingest.acquire() as conn, conn.transaction():
+        await provision_schema(conn, schema, role)
+        await load_demo_tables(conn, schema, data)
+        await grant_reader(conn, schema, role)
+        await rebuild_catalog(
+            session,
+            conn,
+            dataset,
+            table_descriptions={s.name: s.description for s in SCHEMA},
+            column_descriptions=COLUMN_DESCRIPTIONS,
+        )
+        dataset.status = "ready"
+        await session.commit()
+    return SeedResult(user, dataset, True, {k: len(v) for k, v in data.items()}, checksum(data))
+
+
 async def seed_demo(
     databases: Databases,
     settings: Settings,
@@ -95,52 +153,14 @@ async def seed_demo(
     replace: bool = False,
     seed: int = 20261113,
 ) -> SeedResult:
+    """CLI path: create the demo user (used by AUTH_MODE=demo) and provision their copy."""
     if databases.sessions is None or databases.ingest is None:
         raise RuntimeError("DATABASE_URL and INGEST_DATABASE_URL must be configured to seed.")
     async with databases.sessions() as session:
         user = await ensure_demo_user(session, settings.demo_user_email)
-        existing = await session.scalar(
-            select(Dataset).where(Dataset.owner_id == user.id, Dataset.name == DEMO_DATASET_NAME)
+        return await provision_demo(
+            session, databases.ingest, user, scale=scale, replace=replace, seed=seed
         )
-        if existing and existing.status == "ready" and not replace:
-            await session.commit()
-            return SeedResult(user, existing, False, {}, None)
-        if existing:
-            async with databases.ingest.acquire() as conn, conn.transaction():
-                await drop_schema(conn, existing.schema_name, existing.reader_role)
-            await session.delete(existing)
-            await session.flush()
-
-        connection = await get_or_create_internal_connection(session, user)
-        schema, role = new_dataset_identifiers()
-        dataset = Dataset(
-            owner_id=user.id,
-            connection_id=connection.id,
-            name=DEMO_DATASET_NAME,
-            description=DEMO_DESCRIPTION,
-            source_type="demo",
-            schema_name=schema,
-            reader_role=role,
-            status="loading",
-        )
-        session.add(dataset)
-        await session.flush()
-
-        data = await asyncio.to_thread(generate, scale, seed)
-        async with databases.ingest.acquire() as conn, conn.transaction():
-            await provision_schema(conn, schema, role)
-            await load_demo_tables(conn, schema, data)
-            await grant_reader(conn, schema, role)
-            await rebuild_catalog(
-                session,
-                conn,
-                dataset,
-                table_descriptions={s.name: s.description for s in SCHEMA},
-                column_descriptions=COLUMN_DESCRIPTIONS,
-            )
-            dataset.status = "ready"
-            await session.commit()
-        return SeedResult(user, dataset, True, {k: len(v) for k, v in data.items()}, checksum(data))
 
 
 def export_csv(directory: Path, scale: str, seed: int = 20261113) -> list[Path]:

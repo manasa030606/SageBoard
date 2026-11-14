@@ -5,14 +5,26 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import UTC, datetime
+from functools import lru_cache
+from pathlib import Path
 
 import asyncpg
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.db.engines import Databases
 from app.schemas.health import DependencyCheck, HealthResponse, ReadinessResponse
+
+MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
+
+
+@lru_cache(maxsize=1)
+def migration_head() -> str | None:
+    script = ScriptDirectory(str(MIGRATIONS_DIR))
+    return script.get_current_head()
+
 
 log = get_logger(__name__)
 
@@ -42,6 +54,7 @@ class HealthService:
             "executor_database": await self._check_pool(
                 self._databases.executor, "EXECUTOR_DATABASE_URL", "executor"
             ),
+            "migrations": await self._check_migrations(),
             "llm_config": self._check_llm_config(),
         }
         ready = all(check.status == "ok" for check in checks.values())
@@ -67,6 +80,27 @@ class HealthService:
         return DependencyCheck(
             status="ok", latency_ms=round((time.perf_counter() - start) * 1000, 1)
         )
+
+    async def _check_migrations(self) -> DependencyCheck:
+        """The database schema is at the newest migration this build ships."""
+        engine = self._databases.app_engine
+        if engine is None:
+            return DependencyCheck(status="not_configured", detail="DATABASE_URL is not set.")
+        expected = migration_head()
+        try:
+            async with asyncio.timeout(DB_CHECK_TIMEOUT_S), engine.connect() as conn:
+                current = await conn.scalar(text("SELECT version_num FROM app.alembic_version"))
+        except Exception as exc:
+            log.warning("readiness_migrations_failed", error_type=type(exc).__name__)
+            return DependencyCheck(
+                status="unavailable", detail="Migration state could not be read."
+            )
+        if current != expected:
+            return DependencyCheck(
+                status="unavailable",
+                detail=f"Database is at migration {current}, this build needs {expected}. Run: alembic upgrade head",
+            )
+        return DependencyCheck(status="ok", detail=f"At {current}.")
 
     async def _check_pool(
         self, pool: asyncpg.Pool | None, env_name: str, label: str

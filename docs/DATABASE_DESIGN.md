@@ -2,8 +2,8 @@
 
 | Field | Value |
 |---|---|
-| Document | DATABASE_DESIGN v0.3 |
-| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13) records the Phase 3 implementation; see DECISION_LOG D26–D33 |
+| Document | DATABASE_DESIGN v0.4 |
+| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13) records the Phase 3 implementation (D26–D33); v0.4 (2026-11-14) adds the Phase 4 auth tables (migration 0004) |
 | Engine | PostgreSQL 16 — Neon in production, native PostgreSQL locally (Homebrew / Postgres.app; Docker optional). SQLAlchemy 2.x async + asyncpg, Alembic |
 | Permission model | [ADR-0002](adr/0002-database-topology-and-permissions.md) — roles in `infra/postgres/init/001_roles.sh`; per-dataset schemas and reader roles in `app/ingestion/warehouse.py` |
 | Source of truth | §4 is generated from the models: `uv run python scripts/schema_reference.py` (apps/api) |
@@ -53,7 +53,8 @@ All pools use `statement_cache_size=0`, which is required behind Neon's transact
 ## 3. Entity-relationship overview (as built)
 
 ```
-users 1─┬─* database_connections 1─* datasets            (connection FK: NO ACTION, deferred)
+users 1─┬─* refresh_tokens   (CASCADE; only SHA-256 hashes)     audit_log ─0..1→ users (SET NULL)
+        ├─* database_connections 1─* datasets   (connection FK: NO ACTION, deferred)
         ├─* datasets 1─┬─* dataset_tables 1─* dataset_columns
         │              ├─* dataset_relationships (from/to dataset_tables)
         │              └─* ingestion_jobs
@@ -79,10 +80,45 @@ Deletion behaviour (all verified in `tests/integration/test_models.py`):
 | full_name | varchar(200) | NOT NULL |
 | password_hash | text |  |
 | is_active | boolean | NOT NULL, DEFAULT true |
+| last_login_at | timestamp with time zone |  |
 | created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
 | updated_at | timestamp with time zone | NOT NULL, DEFAULT now() |
 
 - UNIQUE INDEX `uq_users_email_lower` (lower(email))
+
+**refresh_tokens**
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | uuid | PK |
+| user_id | uuid | FK → users.id ON DELETE CASCADE, NOT NULL |
+| family_id | uuid | NOT NULL |
+| token_hash | varchar(64) | NOT NULL, UNIQUE |
+| expires_at | timestamp with time zone | NOT NULL |
+| revoked_at | timestamp with time zone |  |
+| replaced_by_id | uuid |  |
+| user_agent | varchar(300) |  |
+| created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
+
+- UNIQUE `uq_refresh_tokens_token_hash` (token_hash)
+- INDEX `ix_refresh_tokens_family_id` (family_id)
+- INDEX `ix_refresh_tokens_user_id` (user_id)
+
+**audit_log**
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | uuid | PK |
+| actor_id | uuid | FK → users.id ON DELETE SET NULL |
+| action | varchar(64) | NOT NULL |
+| target_type | varchar(32) |  |
+| target_id | varchar(64) |  |
+| ip | inet |  |
+| meta | jsonb | NOT NULL |
+| created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
+
+- INDEX `ix_audit_log_actor_id` (actor_id)
+- INDEX `ix_audit_log_created_at` (created_at)
 
 **database_connections**
 
@@ -388,6 +424,7 @@ The window is Nov 2024 – Oct 2026, across six US regions and six categories. B
 | 0001 | `app` schema, extensions, baseline (Phase 1) |
 | 0002 | All 12 application tables, FKs, CHECKs, indexes (Phase 3) |
 | 0003 | `datasets.connection_id` FK → `NO ACTION DEFERRABLE INITIALLY DEFERRED` (found by the cascade test) |
+| 0004 | `refresh_tokens` (hashed, rotating, family id), `audit_log` (INET ip, jsonb meta), `users.last_login_at` (Phase 4) |
 
 Alembic manages `app` only. `ds_%` schemas are excluded by `include_object`, and the version table is `app.alembic_version`. Tests run `downgrade base → upgrade head` and `alembic check` (models == migrations) against a dedicated `sageboard_test` database.
 
@@ -401,4 +438,4 @@ These stay as designed in v0.2 and arrive with the phase that needs them. Nothin
 | `query_results` | 4 | Stored result sets. `query_executions` (as built) is v0.2's `sql_queries` |
 | `visualizations`, `insights`, `insight_evidence` | 6–7 | |
 | `dashboard_widgets` | 8 | |
-| `user_settings`, `refresh_tokens`, `audit_log`, `usage_counters` | Auth & hardening | `users.password_hash` is nullable until auth lands |
+| `user_settings`, `usage_counters` | Settings & hardening | `users.password_hash` stays nullable: the CLI demo user has no password and can't sign in |

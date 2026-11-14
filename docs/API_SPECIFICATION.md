@@ -2,23 +2,53 @@
 
 | Field | Value |
 |---|---|
-| Document | API_SPECIFICATION v0.3 |
-| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13): §3 Datasets updated to the Phase 3 implementation. Decisions: see DECISION_LOG.md |
+| Document | API_SPECIFICATION v0.4 |
+| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13): §3 Datasets as built. v0.4 (2026-11-14): auth, conversations, analysis sessions, history, reports and readiness as built in Phase 4 (§0 lists every endpoint). Decisions: see DECISION_LOG.md |
 | Base URL | `https://<api-host>/api/v1` |
 | Format | JSON (UTF-8); `multipart/form-data` for uploads; `text/event-stream` for run events |
 | Source of truth | FastAPI-generated OpenAPI 3.1 at `/api/v1/openapi.json`. The frontend types are generated from it. |
 
 ---
 
+## 0. Implementation status (Phase 4)
+
+36 operations are live. Each is listed in the OpenAPI document and covered by tests (`tests/test_api_contract.py` fails if the route list changes without this doc).
+
+| Area | Live endpoints | Planned |
+|---|---|---|
+| Health | `GET /healthz`, `GET /readyz` | — |
+| Auth | `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `GET /auth/me` | settings, password change, account deletion (§9) |
+| Datasets | list, upload, finalize, get, `PATCH`, delete, schema, preview, jobs, table `PATCH`, column `PATCH`, `POST /datasets/demo` | — |
+| Connections | `GET /connections` | external PostgreSQL (post-MVP) |
+| Conversations | list, create, get, rename, delete | — |
+| Analysis sessions | `POST /conversations/{id}/sessions`, `GET /analysis-sessions/{id}`, `POST /analysis-sessions/{id}/cancel` | execution by the agent, SSE stream (§5), resume, rerun, trace |
+| History | `GET /history/sessions`, `GET /history/queries` | — |
+| Reports | list, create, get, `PATCH`, delete, `GET /reports/{id}/export.md` | — |
+| Dashboard, settings, usage | — | §8, §9 |
+
+Naming: the v0.2 "runs" are called **analysis sessions** in the API, at `/analysis-sessions/…`. Plain `/sessions` would be confused with sign-in sessions.
+
 ## 1. Conventions
 
-### 1.1 Authentication
-- Session cookie `sb_session` (JWT access token, 15 min, HttpOnly, Secure) plus `sb_refresh` (opaque, 14 days, rotated, path `/api/v1/auth/refresh`).
-- State-changing requests (POST/PUT/PATCH/DELETE) must send `X-CSRF-Token` equal to the `sb_csrf` cookie (double-submit).
-- Unauthenticated → `401 AUTH_REQUIRED`. Accessing another user's resource → `404 NOT_FOUND` (it doesn't leak existence).
+### 1.1 Authentication (as built)
+- Cookies set by register, login and refresh:
+  - `sb_session`: JWT access token, HS256, 15 min, HttpOnly, path `/`.
+  - `sb_refresh`: opaque random token, 14 days, HttpOnly, path `/api/v1/auth`. It rotates on every use and only its SHA-256 hash is stored.
+  - `sb_csrf`: CSRF token, readable by JS. The same token is also returned as `csrf_token` in the response body.
+- All three are `SameSite=Lax` by default (`COOKIE_SAMESITE`). They are `Secure` automatically when `ENV=production`.
+- Every POST/PUT/PATCH/DELETE must send `X-CSRF-Token` equal to the `sb_csrf` cookie. Otherwise the response is `403 CSRF_FAILED`. Exempt endpoints:
+  - `/auth/register` and `/auth/login`, because there is no session yet.
+  - `/auth/refresh`, because a reloaded page has no token in memory and gets one from refresh. A forged refresh only rotates the victim's own cookies, and the attacker can't read the response.
+- `401` codes:
+  - `AUTH_REQUIRED`: no or invalid session.
+  - `TOKEN_EXPIRED`: the access token expired. The client calls `/auth/refresh` once and retries.
+  - `INVALID_CREDENTIALS`: on login, the same message whether or not the email exists.
+- A refresh token presented again after it was rotated revokes its whole family. The exception is a 30-second grace window for two tabs refreshing at once.
+- Another user's resource → `404 NOT_FOUND` on every route. This is tested over the full route list.
+- `AUTH_MODE=demo` (local only, refused in production) makes every request act as the seeded demo user, with no cookies and no CSRF.
 
 ### 1.2 Pagination
-Cursor-based: `?limit=25&cursor=<opaque>` → `{ "items": [...], "next_cursor": "..." | null }`. Max `limit` is 100.
+Cursor (keyset) based: `?limit=25&cursor=<opaque>` → `{ "items": [...], "next_cursor": "..." | null }`. `limit` is 1–100. A malformed cursor → `422 INVALID_CURSOR`. As built for conversations, history and reports; `GET /datasets` returns all of a user's datasets.
 
 ### 1.3 Errors — single envelope
 ```json
@@ -46,17 +76,21 @@ Cursor-based: `?limit=25&cursor=<opaque>` → `{ "items": [...], "next_cursor": 
 ### 1.4 Common headers
 `X-Request-ID` (echoed or generated), `Idempotency-Key` (optional on run creation and uploads).
 
-## 2. Auth
+## 2. Auth (as built)
 
-| Method | Path | Body | Response |
-|---|---|---|---|
-| POST | `/auth/register` | `{email, password (≥10 chars), full_name}` | `201 {user}` + cookies |
-| POST | `/auth/login` | `{email, password}` | `200 {user}` + cookies; `401 INVALID_CREDENTIALS` (same message whether the email exists or not) |
-| POST | `/auth/refresh` | — (refresh cookie) | `204` + new cookies |
-| POST | `/auth/logout` | — | `204` (revokes refresh token, clears cookies) |
-| GET | `/auth/me` | — | `200 {user}` |
+| Method | Path | Body | Response | Errors |
+|---|---|---|---|---|
+| POST | `/auth/register` | `{email, password, full_name}` (no other fields) | `201 Session` + cookies | 409 `EMAIL_TAKEN`, 422 `INVALID_EMAIL` / `WEAK_PASSWORD` / `INVALID_NAME`, 429 |
+| POST | `/auth/login` | `{email, password}` | `200 Session` + cookies | 401 `INVALID_CREDENTIALS`, 429 (5/min per IP+email, 20/min per IP) |
+| POST | `/auth/refresh` | — (refresh cookie) | `200 Session` + rotated cookies | 401 `AUTH_REQUIRED` / `TOKEN_EXPIRED` |
+| POST | `/auth/logout` | — | `204`, revokes this login's refresh tokens and clears cookies | 403 |
+| GET | `/auth/me` | — | `200 Session` (re-issues a lost CSRF cookie) | 401 |
 
-`User = {id, email, full_name, created_at}`
+```ts
+type User = { id: string; email: string; full_name: string; created_at: string };
+type Session = { user: User; csrf_token: string; auth_mode: "session" | "demo" };
+```
+Password policy: 10–128 characters; not a common password; at least 4 distinct characters; not the email address. Stored as argon2id. Emails are trimmed, lower-cased and unique.
 
 ## 3. Datasets — *implemented in Phase 3*
 
@@ -137,45 +171,37 @@ Values treated as missing: empty, `NA`, `N/A`, `NULL`, `None`, `NaN`, `-`, `#N/A
 
 Readiness (`GET /readyz`) now reports `database`, `ingest_database`, `executor_database` and `llm_config`. It is `ready` only when all four are `ok`.
 
-## 4. Conversations & runs
+## 4. Conversations & analysis sessions (as built)
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/conversations?dataset_id=` | `Page<ConversationSummary>` |
-| POST | `/conversations` | `{dataset_id, title?}` → `201 Conversation` |
-| GET | `/conversations/{id}` | Conversation + ordered `RunSummary[]` |
-| PATCH | `/conversations/{id}` | `{title}` |
-| DELETE | `/conversations/{id}` | `204` |
-| POST | `/conversations/{id}/runs` | `{question (1..2000 chars)}` → `202 {run: RunSummary, stream_url}` · `409 DATASET_NOT_READY` · `429` |
-| GET | `/runs/{id}` | `RunDetail` (full, once finished; partial while running) |
-| GET | `/runs/{id}/events` | **SSE** (see §5). Supports `Last-Event-ID`. |
-| POST | `/runs/{id}/resume` | `{answer: string}` → `202`; `409 RUN_NOT_RESUMABLE` unless `awaiting_input` |
-| POST | `/runs/{id}/cancel` | `202`; idempotent |
-| POST | `/runs/{id}/rerun` | `{mode: "same_sql" | "reanalyze"}`. `same_sql` re-validates and executes the stored SQL (no LLM) → new run; `reanalyze` runs the full agent again with the same question. |
-| GET | `/runs/{id}/trace` | `{steps: RunStep[], tool_calls: ToolCall[], llm_calls: LlmCall[], sql_queries: SqlQuery[]}` |
-| GET | `/sql-queries/{id}/result?offset=0&limit=100` | Paged rows from the stored result |
-| GET | `/sql-queries/{id}/result.csv` | CSV download (streams the stored result; formula-injection-safe, see SECURITY §8) |
+| Method | Path | Request | Success | Errors |
+|---|---|---|---|---|
+| GET | `/conversations` | `?dataset_id=&limit=&cursor=` | `200 Page<ConversationSummary>` (most recently active first) | 422 |
+| POST | `/conversations` | `{dataset_id, title?}` | `201 ConversationDetail` | 404 (dataset not yours), 409 `DATASET_NOT_READY` |
+| GET | `/conversations/{id}` | — | `200 ConversationDetail` (messages + sessions) | 404 |
+| PATCH | `/conversations/{id}` | `{title}` | `200 ConversationDetail` | 404, 422 |
+| DELETE | `/conversations/{id}` | — | `204` (messages and sessions cascade) | 404 |
+| POST | `/conversations/{id}/sessions` | `{question}` (1–2000 chars, trimmed) | `202 SessionAccepted` | 404, 409 `DATASET_NOT_READY`, 422 `EMPTY_QUESTION` |
+| GET | `/analysis-sessions/{id}` | — | `200 SessionDetail` | 404 |
+| POST | `/analysis-sessions/{id}/cancel` | — | `200 SessionDetail` (idempotent) | 404, 409 `SESSION_NOT_CANCELLABLE` |
 
 ```ts
-type RunStatus = "queued"|"running"|"awaiting_input"|"succeeded"|"partial"|"failed"|"cancelled";
-type RunSummary = { id: string; conversation_id: string; dataset_id: string; question: string;
-  status: RunStatus; duration_ms: number | null; created_at: string };
-type RunDetail = RunSummary & {
-  understanding: QueryUnderstanding | null;
-  plan: AnalysisPlan | null;
-  steps: { step_id: string; purpose: string; status: "succeeded"|"failed"|"skipped"|"pending";
-           final_sql_query_id: string | null; row_count: number; truncated: boolean; notes: string[] }[];
-  visualizations: { id: string; sql_query_id: string; spec: ChartSpec }[];
-  insights: Insight[];            // verified only; ?include_rejected=true for all
-  final_summary: string | null;
-  limitations: string[];
-  termination_reason: string | null;
-  error: { code: string; message: string } | null;
-  usage: { llm_calls: number; sql_executions: number; tokens_in: number; tokens_out: number };
-  report_id: string | null;
-};
+type ConversationSummary = { id: string; dataset_id: string; title: string; created_at: string; updated_at: string };
+type ConversationDetail = ConversationSummary & { messages: Message[]; sessions: SessionSummary[] };
+type Message = { id: string; role: "user" | "assistant" | "system"; content: string;
+  analysis_session_id: string | null; created_at: string };
+type SessionStatus = "queued" | "running" | "awaiting_input" | "succeeded" | "partial" | "failed" | "cancelled";
+type SessionSummary = { id: string; conversation_id: string; dataset_id: string; question: string;
+  status: SessionStatus; duration_ms: number | null; created_at: string };
+type SessionDetail = SessionSummary & { dataset_version: number; termination_reason: string | null;
+  understanding: object | null; plan: object | null; final_summary: string | null;
+  error_code: string | null; error_message: string | null; llm_calls: number; sql_executions: number;
+  tokens_in: number; tokens_out: number; started_at: string | null; finished_at: string | null };
+type SessionAccepted = { session: SessionSummary; agent_available: boolean; message: string };
 ```
-`QueryUnderstanding`, `AnalysisPlan`, `ChartSpec`, `Insight` and `EvidenceRef` mirror the Pydantic models in AGENT_WORKFLOW §3. They are exported through OpenAPI, so TypeScript and Python can't drift.
+
+**No agent yet.** Asking a question stores a user message and a `queued` session, and returns `agent_available: false` with a message saying so. Nothing answers it. The first question becomes the conversation's title if it still has the default one.
+
+**Planned with the agent phases (unchanged from v0.2):** execution, `GET /analysis-sessions/{id}/events` (SSE, §5), resume, rerun, trace, and paged query results.
 
 ## 5. Run event stream (SSE)
 
@@ -214,32 +240,42 @@ data: {"run_id":"...","seq":17,"ts":"2026-11-11T13:10:02.114Z","node":"validate_
 
 The stream closes after a terminal event. A client connecting after completion gets a full replay followed by the terminal event.
 
-## 6. History
+## 6. History (as built)
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/history/runs?status=&dataset_id=&q=&from=&to=&cursor=&limit=` | `Page<RunSummary & {query_count, insight_count}>` |
-| GET | `/history/queries?dataset_id=&guard_status=&exec_status=&cursor=` | `Page<SqlQuery>` (an SQL-level audit view) |
-
-## 7. Reports
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/reports` | `Page<ReportSummary>` |
-| POST | `/reports` | `{run_id, title?}` → `201 Report`; `409` if the run isn't `succeeded`/`partial` |
-| GET | `/reports/{id}` | `Report` |
-| PATCH | `/reports/{id}` | `{title?, summary?}` (sets `summary_edited_by_user`) |
-| GET | `/reports/{id}/export.md` | Markdown download |
-| DELETE | `/reports/{id}` | `204` |
+| Method | Path | Query | Response |
+|---|---|---|---|
+| GET | `/history/sessions` | `status`, `dataset_id`, `q` (case-insensitive substring of the question; `%` and `_` are literal), `limit`, `cursor` | `Page<SessionSummary>` newest first |
+| GET | `/history/queries` | `dataset_id`, `analysis_session_id`, `origin` (`agent`/`preview`/`widget_refresh`/`rerun`), `exec_status`, `limit`, `cursor` | `Page<QueryHistoryItem>` newest first |
 
 ```ts
-type Report = { id: string; title: string; summary: string; summary_edited_by_user: boolean;
-  run_id: string | null; created_at: string; updated_at: string;
-  content: { question: string; dataset: { name: string; version: number };
-    sections: { heading: string; chart?: ChartSpec; table?: { columns: string[]; rows: unknown[][] };
-                insights: Insight[] }[];
-    limitations: string[]; methodology: { step_id: string; purpose: string; sql: string }[] } };
+type QueryHistoryItem = { id: string; dataset_id: string; dataset_name: string; analysis_session_id: string | null;
+  origin: "agent" | "preview" | "widget_refresh" | "rerun"; attempt: number; executed_sql: string | null;
+  guard_status: "accepted" | "rejected" | "not_applicable"; guard_violations: { code: string; message: string }[];
+  exec_status: "not_run" | "ok" | "error" | "timeout" | "cancelled"; error_code: string | null;
+  error_message: string | null; row_count: number | null; truncated: boolean; exec_ms: number | null; created_at: string };
 ```
+Today the query history holds table previews. Agent SQL will be recorded in the same table.
+
+## 7. Reports (as built)
+
+| Method | Path | Request | Success | Errors |
+|---|---|---|---|---|
+| GET | `/reports` | `?limit=&cursor=` | `200 Page<ReportSummary>` | 422 |
+| POST | `/reports` | `{analysis_session_id, title?}` | `201 ReportDetail` | 404, 409 `SESSION_NOT_FINISHED` (only `succeeded` / `partial`) |
+| GET | `/reports/{id}` | — | `200 ReportDetail` | 404 |
+| PATCH | `/reports/{id}` | `{title?, summary?}` | `200 ReportDetail` (a changed summary sets `summary_edited_by_user`) | 404, 422 |
+| DELETE | `/reports/{id}` | — | `204` | 404 |
+| GET | `/reports/{id}/export.md` | — | `200 text/markdown` attachment: title, question, dataset, summary, methodology (SQL) | 404 |
+
+```ts
+type ReportSummary = { id: string; title: string; analysis_session_id: string | null; dataset_id: string | null;
+  created_at: string; updated_at: string };
+type ReportDetail = ReportSummary & { summary: string; summary_edited_by_user: boolean;
+  content: { question: string; status: string; dataset: { name: string | null; version: number };
+    understanding: object | null; plan: object | null; final_summary: string | null;
+    queries: { sql: string; row_count: number | null; truncated: boolean }[]; finished_at: string | null } };
+```
+`content` is an immutable snapshot taken when the report is saved. Charts and insights join it in the agent phases. Reports outlive their session and dataset (`SET NULL`).
 
 ## 8. Dashboard
 
@@ -262,20 +298,24 @@ type Report = { id: string; title: string; summary: string; summary_edited_by_us
 | GET | `/usage` | `{today: {runs, tokens}, month: {runs, tokens}, limits: {runs_per_day, tokens_per_day}}` |
 | DELETE | `/account` | `{password}` → `202` (async full deletion) |
 
-## 10. Operational
+## 10. Operational (as built)
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/healthz` | Liveness: `{status:"ok"}` |
-| GET | `/readyz` | DB reachable, migrations at head, LLM key configured → `200` / `503` |
+| GET | `/healthz` | Liveness: `{status: "ok", service, version, environment, timestamp}` |
+| GET | `/readyz` | `200 ready` only when all five checks are `ok`: `database`, `ingest_database`, `executor_database`, `migrations` (the database is at this build's Alembic head), `llm_config`. Otherwise `503 not_ready` with per-check detail. No hosts or secrets are ever included |
 
-## 11. Rate limits (defaults; D20)
-| Scope | Limit |
-|---|---|
-| `/auth/login` | 5 / min / IP + email; exponential lockout after 10 failures |
-| Run creation | 10 / min / user, 100 runs / day / user, 2 concurrent |
-| Uploads | 10 / hour / user |
-| Everything else | 120 / min / user |
+Database failures on any other route return `503 DATABASE_UNAVAILABLE` with a generic message. The driver error, host, user and SQL are logged with the request id, never returned.
+
+## 11. Rate limits (as built: in-process, one API instance)
+| Scope | Limit | Setting |
+|---|---|---|
+| `POST /auth/login` | 5 / min per IP + email, 20 / min per IP | `LOGIN_ATTEMPTS_PER_MINUTE` |
+| `POST /auth/register` | 10 / hour per IP | `REGISTRATIONS_PER_HOUR` |
+| `POST /datasets/uploads` | 20 / hour per user | `UPLOADS_PER_HOUR` |
+| Run creation, general API | planned (D20) | — |
+
+Over the limit → `429 RATE_LIMITED` with a `Retry-After` header (exposed through CORS) and `details.retry_after_seconds`.
 
 ## 12. Versioning
 The path version is `/api/v1`. Additive changes are non-breaking. A breaking change means `/api/v2`. SSE event types are additive; clients must ignore unknown event types.

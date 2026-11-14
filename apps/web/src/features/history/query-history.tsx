@@ -1,89 +1,98 @@
 "use client";
 
-import { ArrowUpRight, History, RotateCcw, Search, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { History } from "lucide-react";
+import { useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
+import { Badge, type Tone } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
-import { Input, Select } from "@/components/ui/field";
+import { Select } from "@/components/ui/field";
 import { PageHeader } from "@/components/ui/layout";
-import { EmptyState, Notice } from "@/components/ui/states";
+import { EmptyState, ErrorState, Notice, Skeleton } from "@/components/ui/states";
 import { Table, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { RUN_STATUS } from "@/features/dashboard/dashboard-tables";
 import { SqlCode } from "@/features/analyst/sql-viewer";
-import { formatDateTime, formatDuration, formatRelative } from "@/lib/format";
-import type { Dataset, HistoryEntry, RunStatus } from "@/types/domain";
+import { datasets as datasetsApi, history } from "@/lib/api/endpoints";
+import type { ApiError } from "@/lib/api/errors";
+import type { ExecStatus, QueryHistoryItem, QueryOrigin } from "@/lib/api/types";
+import { formatDateTime, formatInteger, formatRelative } from "@/lib/format";
+import { errorMessage, useApi } from "@/lib/use-api";
 
-const STATUS_FILTERS: Array<{ value: RunStatus | "all"; label: string }> = [
-  { value: "all", label: "All statuses" },
-  { value: "succeeded", label: "Answered" },
-  { value: "partial", label: "Partial" },
-  { value: "failed", label: "Failed" },
-  { value: "cancelled", label: "Cancelled" },
-];
+const ORIGIN: Record<QueryOrigin, string> = {
+  agent: "Analysis",
+  preview: "Preview",
+  widget_refresh: "Dashboard refresh",
+  rerun: "Re-run",
+};
 
-export function QueryHistory({
-  entries,
-  datasets,
-  nowIso,
-}: {
-  entries: readonly HistoryEntry[];
-  datasets: readonly Dataset[];
-  nowIso: string;
-}) {
-  const now = new Date(nowIso);
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<RunStatus | "all">("all");
-  const [datasetId, setDatasetId] = useState("all");
+const EXEC: Record<ExecStatus, { label: string; tone: Tone }> = {
+  ok: { label: "Ran", tone: "positive" },
+  error: { label: "Error", tone: "critical" },
+  timeout: { label: "Timed out", tone: "warning" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
+  not_run: { label: "Not run", tone: "neutral" },
+};
+
+export function QueryHistory() {
+  const [origin, setOrigin] = useState<QueryOrigin | "">("");
+  const [datasetId, setDatasetId] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
-  const datasetName = (id: string) => datasets.find((d) => d.id === id)?.name ?? id;
+  const [more, setMore] = useState<{ items: QueryHistoryItem[]; cursor: string | null } | null>(
+    null,
+  );
+  const [loadingMore, setLoadingMore] = useState(false);
+  const { notify } = useToast();
+  const datasetList = useApi(() => datasetsApi.list(), []);
+  const first = useApi(
+    () => history.queries({ origin, datasetId: datasetId || undefined }),
+    [origin, datasetId],
+  );
+  const [firstSeen, setFirstSeen] = useState(first.data);
+  if (firstSeen !== first.data) {
+    setFirstSeen(first.data); // a new first page replaces anything loaded with "Load more"
+    setMore(null);
+  }
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return entries.filter(
-      (e) =>
-        (status === "all" || e.status === status) &&
-        (datasetId === "all" || e.datasetId === datasetId) &&
-        (!q || e.question.toLowerCase().includes(q)),
-    );
-  }, [entries, query, status, datasetId]);
+  const items = [...(first.data?.items ?? []), ...(more?.items ?? [])];
+  const cursor = more ? more.cursor : (first.data?.next_cursor ?? null);
+  const loading = first.loading || loadingMore;
+  const error: ApiError | undefined = first.error;
 
-  const hasFilters = query !== "" || status !== "all" || datasetId !== "all";
-  const open = entries.find((e) => e.id === openId);
+  async function loadMore() {
+    if (!cursor) return;
+    setLoadingMore(true);
+    try {
+      const page = await history.queries({ origin, datasetId: datasetId || undefined, cursor });
+      setMore((m) => ({ items: [...(m?.items ?? []), ...page.items], cursor: page.next_cursor }));
+    } catch (e) {
+      notify({ tone: "error", title: "Couldn’t load more", description: errorMessage(e) });
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  const filtered = origin !== "" || datasetId !== "";
+  const open = items.find((i) => i.id === openId);
+  const now = new Date();
 
   return (
     <>
       <PageHeader
         eyebrow="Audit trail"
         title="Query history"
-        description="Every question, the SQL that ran and how it ended. Nothing is hidden, including failed attempts."
+        description="Every SQL statement Sageboard ran against your data, with its outcome. Today that’s table previews; analysis queries will appear here too."
       />
 
       <div className="mt-8 flex flex-wrap items-center gap-2">
-        <div className="relative w-full sm:w-80">
-          <Search
-            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3"
-            aria-hidden
-          />
-          <Input
-            type="search"
-            aria-label="Search questions"
-            placeholder="Search questions"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="pl-9"
-          />
-        </div>
         <Select
-          aria-label="Filter by status"
-          value={status}
-          onChange={(e) => setStatus(e.target.value as RunStatus | "all")}
+          aria-label="Filter by source"
+          value={origin}
+          onChange={(e) => setOrigin(e.target.value as QueryOrigin | "")}
         >
-          {STATUS_FILTERS.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
+          <option value="">All sources</option>
+          {Object.entries(ORIGIN).map(([key, label]) => (
+            <option key={key} value={key}>
+              {label}
             </option>
           ))}
         </Select>
@@ -92,201 +101,182 @@ export function QueryHistory({
           value={datasetId}
           onChange={(e) => setDatasetId(e.target.value)}
         >
-          <option value="all">All datasets</option>
-          {datasets.map((d) => (
+          <option value="">All datasets</option>
+          {(datasetList.data ?? []).map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
             </option>
           ))}
         </Select>
-        {hasFilters ? (
+        {filtered ? (
           <Button
             variant="ghost"
             size="sm"
             onClick={() => {
-              setQuery("");
-              setStatus("all");
-              setDatasetId("all");
+              setOrigin("");
+              setDatasetId("");
             }}
-            leadingIcon={<X className="size-3.5" aria-hidden />}
           >
-            Clear
+            Clear filters
           </Button>
         ) : null}
-        <p className="ml-auto text-xs text-ink-2 tabular" aria-live="polite">
-          {filtered.length} of {entries.length} runs
-        </p>
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-md border border-line bg-paper">
-        {filtered.length === 0 ? (
-          <EmptyState
-            icon={<History className="size-5" aria-hidden />}
-            title="No runs match these filters"
-            description="Try a different search term or clear the filters."
+      {error ? (
+        <div className="mt-6 rounded-md border border-line bg-paper">
+          <ErrorState
+            title="Couldn’t load the history"
+            description={error.message}
+            code={error.code}
             action={
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setQuery("");
-                  setStatus("all");
-                  setDatasetId("all");
-                }}
-              >
-                Clear filters
+              <Button variant="secondary" onClick={first.reload}>
+                Try again
               </Button>
             }
           />
-        ) : (
-          <Table>
-            <caption className="sr-only">Query history</caption>
-            <THead>
-              <tr>
-                <TH>Question</TH>
-                <TH className="hidden lg:table-cell">Dataset</TH>
-                <TH>Status</TH>
-                <TH align="right" className="hidden md:table-cell">
-                  Queries
-                </TH>
-                <TH align="right" className="hidden md:table-cell">
-                  Duration
-                </TH>
-                <TH align="right">When</TH>
-              </tr>
-            </THead>
-            <tbody>
-              {filtered.map((e) => (
-                <TR key={e.id} interactive onClick={() => setOpenId(e.id)}>
-                  <TD className="max-w-[460px]">
-                    <button
-                      type="button"
-                      onClick={() => setOpenId(e.id)}
-                      className="line-clamp-2 text-left text-ink hover:text-forest focus-visible:underline"
-                    >
-                      {e.question}
-                    </button>
-                    <span className="font-mono text-2xs text-ink-3">{e.id}</span>
-                  </TD>
-                  <TD className="hidden text-ink-2 lg:table-cell">{datasetName(e.datasetId)}</TD>
-                  <TD>
-                    <Badge tone={RUN_STATUS[e.status].tone} dot>
-                      {RUN_STATUS[e.status].label}
-                    </Badge>
-                  </TD>
-                  <TD numeric className="hidden md:table-cell">
-                    {e.queryCount}
-                  </TD>
-                  <TD numeric className="hidden md:table-cell">
-                    {e.durationMs !== null ? formatDuration(e.durationMs) : "—"}
-                  </TD>
-                  <TD align="right" className="whitespace-nowrap text-ink-2">
-                    {formatRelative(e.createdAt, now)}
-                  </TD>
-                </TR>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </div>
-
-      <HistoryDrawer
-        entry={open}
-        datasetName={open ? datasetName(open.datasetId) : ""}
-        onClose={() => setOpenId(null)}
-      />
-    </>
-  );
-}
-
-function HistoryDrawer({
-  entry,
-  datasetName,
-  onClose,
-}: {
-  entry: HistoryEntry | undefined;
-  datasetName: string;
-  onClose: () => void;
-}) {
-  const { notify } = useToast();
-  return (
-    <Drawer
-      open={Boolean(entry)}
-      onClose={onClose}
-      title="Run details"
-      description={entry ? `${entry.id} · ${formatDateTime(entry.createdAt)}` : undefined}
-      footer={
-        entry ? (
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="ghost"
-              leadingIcon={<RotateCcw className="size-3.5" aria-hidden />}
-              onClick={() =>
-                notify({
-                  tone: "info",
-                  title: "Re-run needs the live agent",
-                  description: "Available once the backend is connected.",
-                })
-              }
-            >
-              Re-run
-            </Button>
-            {entry.scenarioId ? (
-              <ButtonLink
-                href={`/app/analyst?sample=${entry.scenarioId}`}
-                variant="primary"
-                trailingIcon={<ArrowUpRight className="size-4" aria-hidden />}
-              >
-                Open in analyst
-              </ButtonLink>
-            ) : null}
-          </div>
-        ) : null
-      }
-    >
-      {entry ? (
-        <div className="grid gap-6 px-5 py-5">
-          <div>
-            <p className="mb-1.5 eyebrow">Question</p>
-            <p className="text-title text-[19px] text-ink">{entry.question}</p>
-          </div>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px] sm:grid-cols-4">
-            {[
-              [
-                "Status",
-                <Badge key="s" tone={RUN_STATUS[entry.status].tone} dot>
-                  {RUN_STATUS[entry.status].label}
-                </Badge>,
-              ],
-              ["Dataset", datasetName],
-              ["Duration", entry.durationMs !== null ? formatDuration(entry.durationMs) : "—"],
-              ["Rows", entry.rowCount ?? "—"],
-            ].map(([k, v]) => (
-              <div key={String(k)}>
-                <dt className="text-xs text-ink-2">{k}</dt>
-                <dd className="mt-1 text-ink tabular">{v}</dd>
-              </div>
-            ))}
-          </dl>
-          {entry.failureReason ? (
-            <Notice
-              tone={entry.status === "failed" ? "error" : "warning"}
-              title={entry.status === "cancelled" ? "Cancelled" : "Why it didn’t complete"}
-            >
-              {entry.failureReason}
-            </Notice>
-          ) : null}
-          {entry.sql ? (
-            <div>
-              <p className="mb-2 eyebrow">Executed SQL</p>
-              <div className="overflow-hidden rounded-sm border border-line">
-                <SqlCode sql={entry.sql} />
-              </div>
-            </div>
-          ) : (
-            <p className="text-[13px] text-ink-2">No query reached the database for this run.</p>
-          )}
         </div>
-      ) : null}
-    </Drawer>
+      ) : loading && items.length === 0 ? (
+        <div
+          className="mt-6 grid gap-2 rounded-md border border-line bg-paper p-5"
+          aria-busy="true"
+        >
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+        </div>
+      ) : items.length === 0 ? (
+        <EmptyState
+          className="mt-6 rounded-md border border-dashed border-line-strong"
+          icon={<History className="size-5" aria-hidden />}
+          title={filtered ? "Nothing matches these filters" : "No queries yet"}
+          description={
+            filtered
+              ? "Try a different source or dataset."
+              : "Open a table’s “Preview rows” on the Data sources page and the read-only query will be recorded here."
+          }
+          action={
+            filtered ? null : (
+              <ButtonLink href="/app/data" variant="secondary">
+                Go to data sources
+              </ButtonLink>
+            )
+          }
+        />
+      ) : (
+        <>
+          <div className="mt-6 overflow-x-auto rounded-md border border-line bg-paper">
+            <Table>
+              <caption className="sr-only">SQL statements</caption>
+              <THead>
+                <tr>
+                  <TH>Statement</TH>
+                  <TH className="hidden md:table-cell">Dataset</TH>
+                  <TH>Outcome</TH>
+                  <TH align="right" className="hidden sm:table-cell">
+                    Rows
+                  </TH>
+                  <TH align="right" className="hidden sm:table-cell">
+                    Time
+                  </TH>
+                  <TH align="right">When</TH>
+                </tr>
+              </THead>
+              <tbody>
+                {items.map((item) => (
+                  <TR key={item.id} interactive onClick={() => setOpenId(item.id)}>
+                    <TD className="max-w-[28rem]">
+                      <button
+                        type="button"
+                        onClick={() => setOpenId(item.id)}
+                        className="block w-full truncate text-left font-mono text-[12.5px] text-ink focus-visible:underline"
+                      >
+                        {item.executed_sql ?? "—"}
+                      </button>
+                      <p className="text-2xs text-ink-2">{ORIGIN[item.origin]}</p>
+                    </TD>
+                    <TD className="hidden text-ink-2 md:table-cell">{item.dataset_name}</TD>
+                    <TD>
+                      <Badge tone={EXEC[item.exec_status].tone} dot>
+                        {EXEC[item.exec_status].label}
+                      </Badge>
+                    </TD>
+                    <TD numeric className="hidden sm:table-cell">
+                      {item.row_count != null ? formatInteger(item.row_count) : "—"}
+                    </TD>
+                    <TD numeric className="hidden sm:table-cell">
+                      {item.exec_ms != null ? `${item.exec_ms} ms` : "—"}
+                    </TD>
+                    <TD align="right" className="text-ink-2">
+                      {formatRelative(item.created_at, now)}
+                    </TD>
+                  </TR>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+          {cursor ? (
+            <div className="mt-4 flex justify-center">
+              <Button variant="secondary" onClick={() => void loadMore()} disabled={loading}>
+                {loading ? "Loading…" : "Load more"}
+              </Button>
+            </div>
+          ) : null}
+        </>
+      )}
+
+      <Drawer
+        open={Boolean(open)}
+        onClose={() => setOpenId(null)}
+        title={open ? `${ORIGIN[open.origin]} query` : "Query"}
+        description={open ? `${open.dataset_name} · ${formatDateTime(open.created_at)}` : undefined}
+        widthClassName="w-[min(640px,100vw)]"
+      >
+        {open ? (
+          <div className="grid gap-5 px-5 py-5">
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px] sm:grid-cols-4">
+              <div>
+                <dt className="text-ink-2">Outcome</dt>
+                <dd className="mt-0.5 text-ink">{EXEC[open.exec_status].label}</dd>
+              </div>
+              <div>
+                <dt className="text-ink-2">Rows</dt>
+                <dd className="mt-0.5 text-ink tabular">
+                  {open.row_count != null ? formatInteger(open.row_count) : "—"}
+                  {open.truncated ? "+" : ""}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-ink-2">Time</dt>
+                <dd className="mt-0.5 text-ink tabular">
+                  {open.exec_ms != null ? `${open.exec_ms} ms` : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-ink-2">Validation</dt>
+                <dd className="mt-0.5 text-ink">
+                  {open.guard_status === "not_applicable"
+                    ? "Built by Sageboard"
+                    : open.guard_status}
+                </dd>
+              </div>
+            </dl>
+            {open.error_message ? (
+              <Notice tone="error" title={open.error_code ?? "Error"}>
+                {open.error_message}
+              </Notice>
+            ) : null}
+            {open.executed_sql ? (
+              <div className="overflow-hidden rounded-sm border border-line">
+                <SqlCode sql={open.executed_sql} />
+              </div>
+            ) : null}
+            <p className="text-xs text-ink-2">
+              Ran on a read-only connection, inside your dataset’s own schema, with a statement
+              timeout.
+            </p>
+          </div>
+        ) : null}
+      </Drawer>
+    </>
   );
 }

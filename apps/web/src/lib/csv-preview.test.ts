@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { inferType, parseCsvLine, previewCsv, validateUpload } from "./csv-preview";
 
 describe("validateUpload", () => {
-  it("accepts csv/xlsx within the limit", () => {
+  it("accepts csv within the limit and explains Excel", () => {
     expect(validateUpload({ name: "Sales.CSV", size: 1200 })).toBeNull();
-    expect(validateUpload({ name: "book.xlsx", size: 1200 })).toBeNull();
+    expect(validateUpload({ name: "book.xlsx", size: 1200 })).toMatch(/CSV UTF-8/);
   });
   it("rejects other types, empty and oversized files", () => {
     expect(validateUpload({ name: "data.json", size: 10 })).toMatch(/Only/);

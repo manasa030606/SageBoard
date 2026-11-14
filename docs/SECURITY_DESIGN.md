@@ -154,14 +154,32 @@ Fallback if per-dataset roles cannot be administered on the chosen plan: one `sa
 
 ## 7. Application security
 
-- **Passwords:** argon2id (`argon2-cffi`, OWASP params). Min length 10. Checked against a small list of common passwords.
-- **Tokens:** JWT HS256 access token (15 min) signed with `JWT_SECRET` (≥ 32 bytes). Opaque refresh tokens (14 days) stored as SHA-256 hashes, rotated on use, with reuse detection that revokes the whole family.
-- **Cookies:** `HttpOnly; Secure; SameSite=None` (cross-site deployment) or `Lax` (same-site via custom domain; preferred). `sb_csrf` is readable by JS for double-submit.
-- **CORS:** explicit origin allowlist, `allow_credentials=True`, no wildcards.
-- **Headers (web):** CSP `default-src 'self'; connect-src 'self' <api>; img-src 'self' data:; script-src 'self' 'nonce-…'; frame-ancestors 'none'`, plus `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`.
-- **Authorisation:** every repository method takes `owner_id`. There's no "get by id" without an owner. Tests assert a 404 for cross-user access on every resource route (generated test matrix).
-- **Input validation:** Pydantic with length limits on all strings. UUIDs are typed. Enum filters are validated.
-- **Error hygiene:** DB errors are mapped to user-safe messages. SQLSTATE is kept for the agent's feedback, with internal identifiers stripped (e.g. role names). No stack traces in responses.
+**As built (Phase 4):**
+- **Passwords:** argon2id (`argon2-cffi`, RFC 9106 low-memory profile). 10–128 characters. Not a common password, at least 4 distinct characters, not the email address. Hashes are upgraded on login when parameters change. An unknown email still runs a dummy verification, so timing doesn't reveal which accounts exist. Login errors use one message for both cases.
+- **Tokens:**
+  - Access token: JWT HS256, 15 minutes, signed with `JWT_SECRET`. Startup refuses a secret under 32 bytes. Decoding pins the algorithm list (no `alg=none`, no key confusion) and requires `sub`, `exp`, `iat`, `iss` and `typ=access`.
+  - Refresh tokens: 32 random bytes, 14 days. Only the SHA-256 hash is stored. They rotate on every use, and all tokens from one login share a family.
+  - Reuse detection: presenting a rotated token after a 30-second grace window revokes the whole family and writes `auth.refresh_reuse` to the audit log. The grace window covers two tabs refreshing at the same moment.
+  - Sign-out revokes the family.
+- **Cookies:** `sb_session` and `sb_refresh` are HttpOnly; `sb_refresh` is only ever sent to `/api/v1/auth`. `SameSite=Lax` by default; `Secure` is automatic in production. `COOKIE_SAMESITE=none` requires Secure, and startup refuses it otherwise. In production, startup also refuses `COOKIE_SECURE=false` and `AUTH_MODE=demo`.
+- **CSRF:** double-submit. The `sb_csrf` cookie must equal the `X-CSRF-Token` header on every POST/PUT/PATCH/DELETE, compared in constant time. The token is also returned in the response body, so cross-site frontends never need to read another site's cookie. Register, login and refresh are exempt (see API_SPECIFICATION §1.1 for why refresh is safe).
+- **Rate limits:** per-process sliding windows for login (per IP + email and per IP), registration (per IP) and uploads (per user). Over the limit returns 429 with `Retry-After`.
+- **Authorisation:**
+  - Every service method takes the signed-in user, and every query filters by `owner_id`, so another user's resource is a 404, never a 403.
+  - `tests/integration/test_ownership.py` walks every route with an id in its path, using a second user. It fails if a new route can't be checked.
+  - Lists and filters given someone else's ids return nothing.
+  - Each user gets their own copy of the sample dataset in their own schema.
+- **Audit log** (`app.audit_log`): register, login, failed login, logout, refresh-token reuse, dataset create and delete.
+- **Input validation:** Pydantic models reject unknown fields (`extra="forbid"`) and enforce lengths. UUIDs are typed. Enum filters are validated. Cursors are opaque and validated.
+- **Error hygiene:** connection-level database failures return `503 DATABASE_UNAVAILABLE` with no driver text, host, user or SQL (tested). Unexpected errors return a generic 500, with details only in the log under the request id.
+- **CORS:** explicit origin allowlist with credentials. The allowed headers include `X-CSRF-Token`; `Retry-After` is exposed. Other origins get no CORS headers (tested).
+- **Frontend:** all data is fetched client-side with `credentials: "include"`. The app area waits for `/auth/me` before rendering. A session change (sign-in, sign-out or expiry) triggers a full page load, so no client-side state from the previous session survives. After sign-in the app only redirects to same-app paths (`/app…`), never another site.
+
+**Planned:**
+- Content Security Policy and other security headers (Phase 13).
+- Password change and account deletion (deletion must also drop the user's warehouse schemas).
+- Email verification and password reset.
+- Rate limits shared across instances.
 
 ## 8. File upload security
 

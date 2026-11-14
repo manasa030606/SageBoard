@@ -1,6 +1,6 @@
 "use client";
 
-import { FileUp, UploadCloud } from "lucide-react";
+import { AlertTriangle, FileUp, UploadCloud } from "lucide-react";
 import { useRef, useState, type DragEvent } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -10,27 +10,42 @@ import { Field, Input, Select } from "@/components/ui/field";
 import { Notice } from "@/components/ui/states";
 import { Table, TD, TH, THead, TR } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import { datasets } from "@/lib/api/endpoints";
+import { ApiError } from "@/lib/api/errors";
+import {
+  COLUMN_TYPES,
+  type ColumnType,
+  type DatasetDetail,
+  type UploadIssue,
+  type UploadReview,
+} from "@/lib/api/types";
 import { cn } from "@/lib/cn";
-import { previewCsv, validateUpload, type CsvPreview } from "@/lib/csv-preview";
-import { formatBytes } from "@/lib/format";
-import type { ColumnType } from "@/types/domain";
-
-const TYPES: ColumnType[] = [
-  "integer",
-  "bigint",
-  "numeric",
-  "boolean",
-  "date",
-  "timestamptz",
-  "text",
-];
+import { validateUpload } from "@/lib/csv-preview";
+import { formatBytes, formatInteger } from "@/lib/format";
 
 type Step =
-  | { kind: "select"; error?: string }
-  | { kind: "reading"; file: File }
-  | { kind: "review"; file: File; preview: CsvPreview | null; types: ColumnType[] };
+  | { kind: "select"; error?: string; issues?: UploadIssue[] }
+  | { kind: "chosen"; file: File }
+  | { kind: "analysing"; file: File }
+  | { kind: "review"; file: File; review: UploadReview; types: Record<string, ColumnType> }
+  | { kind: "loading"; file: File; review: UploadReview; types: Record<string, ColumnType> }
+  | { kind: "failed"; file: File; message: string };
 
-export function UploadDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+function issuesFrom(error: unknown): UploadIssue[] | undefined {
+  if (!(error instanceof ApiError)) return undefined;
+  const issues = error.details["issues"];
+  return Array.isArray(issues) ? (issues as UploadIssue[]) : undefined;
+}
+
+export function UploadDrawer({
+  open,
+  onClose,
+  onLoaded,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onLoaded: (dataset: DatasetDetail) => void;
+}) {
   const [step, setStep] = useState<Step>({ kind: "select" });
   const [name, setName] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -42,32 +57,69 @@ export function UploadDrawer({ open, onClose }: { open: boolean; onClose: () => 
     setName("");
   }
 
-  async function accept(file: File) {
+  function close() {
+    // A reviewed-but-unconfirmed upload is a pending dataset on the server: discard it.
+    if (step.kind === "review") void datasets.remove(step.review.dataset.id).catch(() => undefined);
+    reset();
+    onClose();
+  }
+
+  function choose(file: File) {
     const error = validateUpload(file);
     if (error) {
       setStep({ kind: "select", error });
       return;
     }
-    setName(file.name.replace(/\.(csv|xlsx)$/i, "").replace(/[_-]+/g, " "));
-    setStep({ kind: "reading", file });
-    if (file.name.toLowerCase().endsWith(".xlsx")) {
-      // Spreadsheet parsing happens server-side; the review step lists sheets later.
-      setStep({ kind: "review", file, preview: null, types: [] });
-      return;
-    }
+    setName(
+      file.name
+        .replace(/\.csv$/i, "")
+        .replace(/[_-]+/g, " ")
+        .trim(),
+    );
+    setStep({ kind: "chosen", file });
+  }
+
+  async function analyse(file: File) {
+    setStep({ kind: "analysing", file });
     try {
-      const text = await file.slice(0, 512 * 1024).text();
-      const preview = previewCsv(text);
+      const review = await datasets.upload(file, name);
       setStep({
         kind: "review",
         file,
-        preview,
-        types: preview.columns.map((c) => c.suggestedType),
+        review,
+        types: Object.fromEntries(review.columns.map((c) => [c.name, c.inferred_type])),
       });
-    } catch (e) {
+    } catch (error) {
       setStep({
         kind: "select",
-        error: e instanceof Error ? e.message : "The file could not be read.",
+        error: error instanceof ApiError ? error.message : "The file couldn’t be uploaded.",
+        issues: issuesFrom(error),
+      });
+    }
+  }
+
+  async function load(current: Extract<Step, { kind: "review" }>) {
+    setStep({ ...current, kind: "loading" });
+    const overrides = Object.fromEntries(
+      current.review.columns
+        .filter((c) => current.types[c.name] !== c.inferred_type)
+        .map((c) => [c.name, current.types[c.name]!]),
+    );
+    try {
+      const dataset = await datasets.finalize(current.review.dataset.id, overrides);
+      notify({
+        tone: "success",
+        title: `“${dataset.name}” is ready`,
+        description: `${formatInteger(dataset.total_rows ?? 0)} rows loaded.`,
+      });
+      onLoaded(dataset);
+      reset();
+      onClose();
+    } catch (error) {
+      setStep({
+        kind: "failed",
+        file: current.file,
+        message: error instanceof ApiError ? error.message : "The dataset couldn’t be loaded.",
       });
     }
   }
@@ -76,42 +128,50 @@ export function UploadDrawer({ open, onClose }: { open: boolean; onClose: () => 
     event.preventDefault();
     setDragging(false);
     const file = event.dataTransfer.files[0];
-    if (file) void accept(file);
+    if (file) choose(file);
   }
 
-  function finalize() {
-    notify({
-      tone: "info",
-      title: "Upload reviewed",
-      description:
-        "Loading into a dataset needs the ingestion service (a later phase). Nothing was stored.",
-    });
-    reset();
-    onClose();
-  }
+  const footer =
+    step.kind === "chosen" ? (
+      <div className="flex items-center justify-between gap-3">
+        <Button variant="ghost" onClick={reset}>
+          Choose another file
+        </Button>
+        <Button variant="primary" onClick={() => void analyse(step.file)} disabled={!name.trim()}>
+          Check file
+        </Button>
+      </div>
+    ) : step.kind === "review" || step.kind === "loading" ? (
+      <div className="flex items-center justify-between gap-3">
+        <Button variant="ghost" onClick={close} disabled={step.kind === "loading"}>
+          Discard
+        </Button>
+        <Button
+          variant="primary"
+          onClick={() => step.kind === "review" && void load(step)}
+          disabled={step.kind === "loading"}
+        >
+          {step.kind === "loading"
+            ? "Loading…"
+            : `Load ${formatInteger(step.review.row_count)} rows`}
+        </Button>
+      </div>
+    ) : step.kind === "failed" ? (
+      <div className="flex justify-end">
+        <Button variant="secondary" onClick={reset}>
+          Upload another file
+        </Button>
+      </div>
+    ) : null;
 
   return (
     <Drawer
       open={open}
-      onClose={() => {
-        reset();
-        onClose();
-      }}
+      onClose={close}
       title="Upload a dataset"
-      description="CSV or Excel, up to 25 MB. You’ll review column types before anything is loaded."
-      widthClassName="w-[min(640px,100vw)]"
-      footer={
-        step.kind === "review" ? (
-          <div className="flex items-center justify-between gap-3">
-            <Button variant="ghost" onClick={reset}>
-              Choose another file
-            </Button>
-            <Button variant="primary" onClick={finalize} disabled={!name.trim()}>
-              Load dataset
-            </Button>
-          </div>
-        ) : null
-      }
+      description="A UTF-8 CSV up to 25 MB. Sageboard checks it first; nothing is stored until you confirm the column types."
+      widthClassName="w-[min(680px,100vw)]"
+      footer={footer}
     >
       <div className="grid gap-5 px-5 py-5">
         {step.kind === "select" ? (
@@ -119,6 +179,13 @@ export function UploadDrawer({ open, onClose }: { open: boolean; onClose: () => 
             {step.error ? (
               <Notice tone="error" title="That file can’t be used">
                 {step.error}
+                {step.issues?.length ? (
+                  <ul className="mt-2 grid list-disc gap-1 pl-4">
+                    {step.issues.slice(0, 8).map((issue, i) => (
+                      <li key={`${issue.code}-${i}`}>{issue.message}</li>
+                    ))}
+                  </ul>
+                ) : null}
               </Notice>
             ) : null}
             <div
@@ -134,7 +201,7 @@ export function UploadDrawer({ open, onClose }: { open: boolean; onClose: () => 
               )}
             >
               <UploadCloud className="size-7 text-forest" aria-hidden strokeWidth={1.5} />
-              <p className="mt-3 text-sm font-medium text-ink">Drag a file here</p>
+              <p className="mt-3 text-sm font-medium text-ink">Drag a CSV file here</p>
               <p className="mt-1 text-[13px] text-ink-2">or</p>
               <Button
                 className="mt-3"
@@ -147,98 +214,166 @@ export function UploadDrawer({ open, onClose }: { open: boolean; onClose: () => 
               <input
                 ref={input}
                 type="file"
-                accept=".csv,.xlsx"
+                accept=".csv,text/csv"
                 className="sr-only"
-                aria-label="Choose a CSV or Excel file"
+                aria-label="Choose a CSV file"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) void accept(file);
+                  if (file) choose(file);
                   e.target.value = "";
                 }}
               />
               <p className="mt-5 text-2xs text-ink-2">
-                .csv (comma, semicolon or tab) · .xlsx · max 25 MB · 200 columns
+                .csv (comma, semicolon, tab or pipe) · UTF-8 · max 25 MB · 200 columns · 1M rows
               </p>
             </div>
           </>
         ) : null}
 
-        {step.kind === "reading" ? (
+        {step.kind !== "select" ? (
+          <div className="flex items-center justify-between gap-3 rounded-sm border border-line bg-warm/50 px-3.5 py-2.5 text-[13px]">
+            <span className="truncate font-medium text-ink">{step.file.name}</span>
+            <span className="shrink-0 text-ink-2 tabular">{formatBytes(step.file.size)}</span>
+          </div>
+        ) : null}
+
+        {step.kind === "chosen" ? (
+          <Field label="Dataset name" hint="You can rename it later.">
+            {({ id, describedBy }) => (
+              <Input
+                id={id}
+                value={name}
+                maxLength={120}
+                aria-describedby={describedBy}
+                onChange={(e) => setName(e.target.value)}
+              />
+            )}
+          </Field>
+        ) : null}
+
+        {step.kind === "analysing" ? (
           <p role="status" className="text-sm text-ink-2">
-            Reading {step.file.name}…
+            Checking {step.file.name}: encoding, columns, types and missing values…
           </p>
         ) : null}
 
-        {step.kind === "review" ? (
-          <>
-            <div className="flex items-center justify-between gap-3 rounded-sm border border-line bg-warm/50 px-3.5 py-2.5 text-[13px]">
-              <span className="truncate font-medium text-ink">{step.file.name}</span>
-              <span className="shrink-0 text-ink-2 tabular">{formatBytes(step.file.size)}</span>
-            </div>
-            <Field label="Dataset name">
-              {({ id }) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} />}
-            </Field>
-            {step.preview ? (
-              <div className="grid gap-2">
-                <div className="flex items-baseline justify-between">
-                  <p className="text-[13px] font-medium text-ink">Columns</p>
-                  <p className="text-xs text-ink-2">
-                    Types suggested from the first {step.preview.sampleRowCount} rows · change any
-                    that look wrong
-                  </p>
-                </div>
-                <div className="overflow-hidden rounded-sm border border-line">
-                  <Table>
-                    <THead>
-                      <tr>
-                        <TH>Column</TH>
-                        <TH>Type</TH>
-                        <TH>Sample values</TH>
-                      </tr>
-                    </THead>
-                    <tbody>
-                      {step.preview.columns.map((col, i) => (
-                        <TR key={`${col.name}-${i}`}>
-                          <TD className="font-mono text-[12.5px]">{col.name}</TD>
-                          <TD className="w-40">
-                            <Select
-                              size="sm"
-                              aria-label={`Type for ${col.name}`}
-                              className="w-full"
-                              value={step.types[i]}
-                              onChange={(e) => {
-                                const types = [...step.types];
-                                types[i] = e.target.value as ColumnType;
-                                setStep({ ...step, types });
-                              }}
-                            >
-                              {TYPES.map((t) => (
-                                <option key={t} value={t}>
-                                  {t}
-                                </option>
-                              ))}
-                            </Select>
-                          </TD>
-                          <TD className="max-w-48 truncate text-ink-2">
-                            {col.samples.join(", ") || "—"}
-                            {col.nullCount > 0 ? (
-                              <Badge className="ml-2">{col.nullCount} empty</Badge>
-                            ) : null}
-                          </TD>
-                        </TR>
-                      ))}
-                    </tbody>
-                  </Table>
-                </div>
-              </div>
-            ) : (
-              <Notice tone="info" title="Excel workbook">
-                Sheets and column types are detected on the server when the file is loaded.
-              </Notice>
-            )}
-          </>
+        {step.kind === "failed" ? (
+          <Notice tone="error" title="Nothing was loaded">
+            {step.message}
+          </Notice>
+        ) : null}
+
+        {step.kind === "review" || step.kind === "loading" ? (
+          <Review
+            review={step.review}
+            types={step.types}
+            disabled={step.kind === "loading"}
+            onType={(column, type) =>
+              step.kind === "review" &&
+              setStep({ ...step, types: { ...step.types, [column]: type } })
+            }
+          />
         ) : null}
       </div>
     </Drawer>
+  );
+}
+
+function Review({
+  review,
+  types,
+  disabled,
+  onType,
+}: {
+  review: UploadReview;
+  types: Record<string, ColumnType>;
+  disabled: boolean;
+  onType: (column: string, type: ColumnType) => void;
+}) {
+  const warnings = review.issues.filter((i) => i.severity === "warning");
+  return (
+    <>
+      <p className="text-sm text-ink-2">
+        <span className="font-medium text-ink">{formatInteger(review.row_count)}</span> rows ·{" "}
+        {review.columns.length} columns
+        {review.rejected_count > 0 ? (
+          <>
+            {" "}
+            ·{" "}
+            <span className="text-amber-ink">
+              {formatInteger(review.rejected_count)} malformed rows will be skipped
+            </span>
+          </>
+        ) : null}
+      </p>
+      {warnings.length ? (
+        <Notice tone="warning" title="Worth a look before loading">
+          <ul className="grid gap-1">
+            {warnings.slice(0, 6).map((w, i) => (
+              <li key={`${w.code}-${i}`} className="flex gap-1.5">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                {w.message}
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      ) : null}
+      <div className="grid gap-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-[13px] font-medium text-ink">Columns</p>
+          <p className="text-xs text-ink-2">
+            Types inferred from every row · change any that look wrong
+          </p>
+        </div>
+        <div className="overflow-x-auto rounded-sm border border-line">
+          <Table>
+            <THead>
+              <tr>
+                <TH>Column</TH>
+                <TH>Type</TH>
+                <TH>Sample values</TH>
+              </tr>
+            </THead>
+            <tbody>
+              {review.columns.map((col) => (
+                <TR key={col.name}>
+                  <TD>
+                    <span className="font-mono text-[12.5px] text-ink">{col.name}</span>
+                    {col.display_name !== col.name ? (
+                      <p className="text-2xs text-ink-2">from “{col.display_name}”</p>
+                    ) : null}
+                  </TD>
+                  <TD className="w-40">
+                    <Select
+                      size="sm"
+                      aria-label={`Type for ${col.name}`}
+                      className="w-full"
+                      value={types[col.name]}
+                      disabled={disabled}
+                      onChange={(e) => onType(col.name, e.target.value as ColumnType)}
+                    >
+                      {COLUMN_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </Select>
+                    {types[col.name] !== col.inferred_type ? (
+                      <p className="mt-1 text-2xs text-ink-2">suggested: {col.inferred_type}</p>
+                    ) : null}
+                  </TD>
+                  <TD className="max-w-56 truncate text-ink-2">
+                    {col.sample_values.join(", ") || "—"}
+                    {col.missing_count > 0 ? (
+                      <Badge className="ml-2">{formatInteger(col.missing_count)} empty</Badge>
+                    ) : null}
+                  </TD>
+                </TR>
+              ))}
+            </tbody>
+          </Table>
+        </div>
+      </div>
+    </>
   );
 }

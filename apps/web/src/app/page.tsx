@@ -92,11 +92,11 @@ export default function LandingPage() {
             </a>
           </nav>
           <div className="flex items-center gap-2">
-            <ButtonLink href="/app/dashboard" variant="ghost" className="hidden sm:inline-flex">
+            <ButtonLink href="/login" variant="ghost" className="hidden sm:inline-flex">
               Sign in
             </ButtonLink>
-            <ButtonLink href="/app/analyst" variant="primary">
-              Open the demo
+            <ButtonLink href="/register" variant="primary">
+              Create account
             </ButtonLink>
           </div>
         </div>
@@ -130,7 +130,7 @@ export default function LandingPage() {
               </ButtonLink>
             </div>
             <p className="mt-5 text-xs text-ink-2">
-              Runs on a bundled retail sample dataset. No sign-up needed for the demo.
+              Create an account and load the sample e-commerce dataset in one click.
             </p>
           </div>
           <ProductPreview />

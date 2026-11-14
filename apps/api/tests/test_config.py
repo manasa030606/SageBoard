@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import Environment, LLMProvider, Settings
+from tests.conftest import TEST_JWT_SECRET
 
 
 def test_defaults_are_safe_for_development(settings_factory: Callable[..., Settings]) -> None:
@@ -17,6 +18,7 @@ def test_defaults_are_safe_for_development(settings_factory: Callable[..., Setti
 
 def test_cors_origins_parse_from_comma_separated_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CORS_ORIGINS", "http://localhost:3000, http://127.0.0.1:3000/")
+    monkeypatch.setenv("JWT_SECRET", TEST_JWT_SECRET)
     settings = Settings(_env_file=None)
     assert settings.cors_origins == ["http://localhost:3000", "http://127.0.0.1:3000"]
 

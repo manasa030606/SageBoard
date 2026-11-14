@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from collections.abc import Callable, Coroutine, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -80,6 +82,7 @@ def pg_settings(pg: PgUrls, tmp_path: Path) -> Callable[..., Settings]:
             "ingest_database_url": pg.ingest,
             "executor_database_url": pg.executor,
             "upload_dir": tmp_path / "uploads",
+            "demo_dataset_scale": "small",
         }
         values.update(overrides)
         return make_settings(**values)
@@ -106,8 +109,35 @@ def seed(pg_settings: Callable[..., Settings]) -> Callable[..., Any]:
     return do
 
 
+PASSWORD = "correct horse battery staple"
+
+
+def sign_up(
+    client: TestClient, email: str | None = None, name: str = "Test Analyst"
+) -> dict[str, Any]:
+    """Register a fresh account; the client keeps its cookies and sends the CSRF header."""
+    email = email or f"user-{uuid.uuid4().hex[:10]}@example.test"
+    response = client.post(
+        "/api/v1/auth/register", json={"email": email, "password": PASSWORD, "full_name": name}
+    )
+    assert response.status_code == 201, response.text
+    body: dict[str, Any] = response.json()
+    client.headers["X-CSRF-Token"] = body["csrf_token"]
+    return body
+
+
+@contextmanager
+def signed_in(settings: Settings, *, with_demo: bool = True) -> Iterator[TestClient]:
+    with TestClient(create_app(settings)) as client:
+        sign_up(client)
+        if with_demo:
+            response = client.post("/api/v1/datasets/demo")
+            assert response.status_code in {200, 201}, response.text
+        yield client
+
+
 @pytest.fixture
-def api(pg_settings: Callable[..., Settings], seed: Callable[..., Any]) -> Iterator[TestClient]:
-    seed()  # ensures the demo user exists (idempotent)
-    with TestClient(create_app(pg_settings())) as client:
+def api(pg_settings: Callable[..., Settings]) -> Iterator[TestClient]:
+    """A signed-in user with their own copy of the (small) demo dataset."""
+    with signed_in(pg_settings()) as client:
         yield client

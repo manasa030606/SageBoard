@@ -1,20 +1,19 @@
 /*
- * Data-access layer — the ONLY module components use to read data.
+ * Sample-data access for the pages that still show recorded sample runs
+ * (Dashboard and Analyst) until the AI analyst is connected.
  *
- * Phase 2: every function reads the demo data in src/mocks. In later phases each
- * body is replaced by a call to the typed API client (src/lib/api), keeping the
- * same signatures, so pages and components do not change.
+ * Everything else — sign-in, datasets, uploads, previews, history and reports — reads
+ * the real API through src/lib/api/endpoints.ts.
  */
 import { DATASETS } from "@/mocks/datasets";
 import { DEMO_NOW } from "@/mocks/sales";
 import { SAMPLE_SCENARIOS } from "@/mocks/scenarios";
-import { CONVERSATIONS, HISTORY, REPORTS, USAGE, USER_SETTINGS } from "@/mocks/workspace";
+import { CONVERSATIONS, HISTORY, USAGE, USER_SETTINGS } from "@/mocks/workspace";
 import type {
   Conversation,
   DashboardSummary,
   Dataset,
   HistoryEntry,
-  Report,
   SampleScenario,
   UsageSummary,
   UserSettings,
@@ -82,14 +81,6 @@ export function scenarioForConversation(conversationId: string): SampleScenario 
   const conversation = CONVERSATIONS.find((c) => c.id === conversationId);
   const run = HISTORY.find((h) => h.id === conversation?.runIds[0]);
   return run?.scenarioId ? getScenario(run.scenarioId) : undefined;
-}
-
-export function listReports(): readonly Report[] {
-  return REPORTS;
-}
-
-export function getReport(id: string): Report | undefined {
-  return REPORTS.find((r) => r.id === id);
 }
 
 export function getUserSettings(): UserSettings {

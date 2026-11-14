@@ -17,6 +17,8 @@ from app.db.base import APP_SCHEMA, Base
 
 ORDER = [
     "users",
+    "refresh_tokens",
+    "audit_log",
     "database_connections",
     "datasets",
     "dataset_tables",
