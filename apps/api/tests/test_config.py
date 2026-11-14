@@ -52,7 +52,7 @@ def test_mock_llm_is_refused_in_production(settings_factory: Callable[..., Setti
     [
         ("anthropic", "anthropic_api_key"),
         ("openai", "openai_api_key"),
-        ("gemini", "gemini_api_key"),
+        ("google", "google_api_key"),
     ],
 )
 def test_real_provider_requires_its_key_and_model(
@@ -94,3 +94,29 @@ def test_secrets_are_not_exposed_in_repr(settings_factory: Callable[..., Setting
 
 def test_environment_enum_values() -> None:
     assert {e.value for e in Environment} == {"development", "test", "production"}
+
+
+def test_google_provider_accepts_documented_env_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "google")
+    monkeypatch.setenv("LLM_MODEL", "gemini-3.8-flash")
+    monkeypatch.setenv("GOOGLE_API_KEY", "g-test")
+    settings = Settings(_env_file=None, jwt_secret="x" * 40)
+    assert settings.llm_provider is LLMProvider.GOOGLE
+    assert (
+        settings.google_api_key is not None
+        and settings.google_api_key.get_secret_value() == "g-test"
+    )
+    assert "g-test" not in repr(settings)
+
+
+def test_gemini_names_still_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("LLM_MODEL", "gemini-3.8-flash")
+    monkeypatch.setenv("GEMINI_API_KEY", "g-old")
+    settings = Settings(_env_file=None, jwt_secret="x" * 40)
+    assert settings.llm_provider is LLMProvider.GOOGLE
+
+
+def test_google_without_key_names_google_api_key(settings_factory: Callable[..., Settings]) -> None:
+    with pytest.raises(ValidationError, match="GOOGLE_API_KEY"):
+        settings_factory(llm_provider="google", llm_model="gemini-3.8-flash")

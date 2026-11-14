@@ -121,6 +121,10 @@ class HealthService:
         )
 
     def _check_llm_config(self) -> DependencyCheck:
-        # Configuration is validated at startup (Settings). No network call is made here:
-        # provider connectivity is checked by the adapter introduced in Phase 5.
-        return DependencyCheck(status="ok", detail=f"provider={self._settings.llm_provider.value}")
+        # Configuration is validated at startup (Settings). No network call is made here,
+        # so readiness probes never spend model quota; scripts/check_llm.py tests the key.
+        s = self._settings
+        detail = f"provider={s.llm_provider.value}" + (
+            f" model={s.llm_model}" if s.llm_model else ""
+        )
+        return DependencyCheck(status="ok", detail=detail)

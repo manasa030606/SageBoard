@@ -331,7 +331,7 @@ function WelcomePanel({
           className="mt-8 rounded-md border border-dashed border-line-strong"
           icon={<Database className="size-5" aria-hidden />}
           title="No sample runs for this dataset"
-          description="Recorded examples exist for the Retail demo dataset. Live analysis of any dataset arrives with the agent in a later phase."
+          description="Recorded examples exist for the Retail demo dataset. Live analysis of any dataset arrives when this workspace is connected to the agent."
         />
       )}
     </div>

@@ -63,10 +63,31 @@ class SessionDetail(SessionSummary):
     tokens_out: int
     started_at: datetime | None
     finished_at: datetime | None
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    result: dict[str, Any] | None = Field(
+        default=None,
+        description="Final response, steps (SQL, previews), facts, charts and verification report.",
+    )
+
+
+class NodeRunOut(BaseModel):
+    """One node execution in the agent's trace."""
+
+    model_config = ConfigDict(from_attributes=True)
+    seq: int
+    node: str
+    status: Literal["succeeded", "failed", "degraded"]
+    started_at: datetime
+    duration_ms: int
+    summary: dict[str, Any]
+    tool_calls: list[dict[str, Any]]
+    llm_calls: list[dict[str, Any]]
+    error: str | None
 
 
 class SessionAccepted(BaseModel):
-    """Response to creating a session. ``agent_available`` is false until the agent phase."""
+    """Response to creating a session. ``agent_available`` says whether a run started."""
 
     session: SessionSummary
     agent_available: bool

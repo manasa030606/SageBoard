@@ -44,7 +44,7 @@ export function ReportsList() {
           className="mt-10 rounded-md border border-dashed border-line-strong"
           icon={<FileText className="size-5" aria-hidden />}
           title="No reports yet"
-          description="Reports are saved from finished analyses. The AI analyst isn’t connected yet, so there’s nothing to save — the Analyst page shows recorded sample runs in the meantime."
+          description="Reports are saved from finished analyses. The workspace isn’t connected to the live agent yet, so there’s nothing to save here — the Analyst page shows recorded sample runs in the meantime."
           action={
             <ButtonLink href="/app/analyst" variant="secondary">
               See a sample run

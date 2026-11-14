@@ -26,6 +26,10 @@ def make_settings(**overrides: Any) -> Settings:
         "database_url": None,
         "llm_provider": "mock",
         "jwt_secret": TEST_JWT_SECRET,
+        # Tests share one database all day: no daily model cap or pacing unless a test
+        # sets them explicitly (test_daily_model_limit_stops_new_analyses does).
+        "llm_daily_request_limit": 0,
+        "llm_requests_per_minute": 0,
     }
     base.update(overrides)
     return Settings(_env_file=None, **base)

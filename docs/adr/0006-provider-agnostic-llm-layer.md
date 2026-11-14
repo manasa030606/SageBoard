@@ -2,7 +2,7 @@
 
 | Status | Accepted (2026-11-12) — resolves Open Decision **D1** |
 |---|---|
-| Implemented in | Phase 1 (configuration and validation only) · Phase 5 (adapter, providers, mock) |
+| Implemented in | Phase 1 (configuration and validation only) · Phase 5 (adapters for Anthropic, OpenAI, Gemini; mock = no model, see Amendment 2) |
 
 ## Context
 The team hasn't confirmed which LLM API credits are available. The agent workflow must not depend on any one vendor, and the early phases must not be blocked by this.
@@ -32,3 +32,23 @@ The team hasn't confirmed which LLM API credits are available. The agent workflo
 
 ## Amends
 - TESTING_STRATEGY §1 previously placed the fake LLM only under `tests/`. Per your decision, the mock becomes a first-class provider usable in **development** too. It stays forbidden in production by settings validation.
+
+## Amendment 2 (2026-11-14, Phase 5) — D42
+- In the running application, `LLM_PROVIDER=mock` now builds **no model**. Analysis sessions stay `queued`, and the API says why (`agent_available: false`). A development mock that answered arbitrary questions would be a fabricated AI response, which the project rules forbid.
+- Scripted model replies live only in `tests/agent/fakes.py` (`ScriptedProvider`). They stand in for the model alone. The graph, structured-output validation and re-asks, SQL Guard, routing, analysis engine and grounding all run for real, and integration tests use the real database. Runs persist the provider name (`scripted` in tests), so a scripted run can never pass as a real one.
+- The adapters call each provider's HTTP API directly (no SDKs). Anthropic uses one forced tool whose `input_schema` is the JSON Schema; OpenAI and Gemini (through its OpenAI-compatible endpoint) use `response_format: json_schema` with `strict: false`, because Pydantic defaults aren't strict-mode compatible. Every reply is validated with one corrective re-ask.
+- The provider evaluation (§4) moves to Phase 6, where a real key is available. Accuracy is reported only from real-provider runs.
+
+## Amendment 3 (2026-11-14) — D50: free Gemini tier for development
+- Provider name `google` (`gemini` still accepted). Key: `GOOGLE_API_KEY` (`GEMINI_API_KEY` accepted). The owner's model choice is `gemini-3.8-flash`, subject to it having free-tier quota on her key; `scripts/check_llm.py` verifies that with one request.
+- Google's 429s are classified from the error body (`QuotaFailure.quotaId`, `RetryInfo.retryDelay`):
+  - per-minute → wait and retry (bounded);
+  - per-day or `limit: 0` → `LLM_QUOTA_EXCEEDED` / `LLM_MODEL_NOT_FREE`, never retried.
+
+  Fatal model errors (`FATAL_LLM_CODES`) end the run as `llm_unavailable` with the reason, instead of being absorbed by node fallbacks.
+- Free-tier protection:
+  - one per-process request pacer;
+  - a daily model-call cap counted from `agent_node_runs`;
+  - no automatic provider, model or tier fallback;
+  - readiness probes never call the model.
+- Schema compatibility: for Google, cosmetic JSON Schema keywords (`title`, `default`, `description`, `examples`) are dropped. If the endpoint still rejects the schema (400), the adapter switches once to `json_object` mode with the schema in the system prompt. Pydantic validation and the corrective re-ask are unchanged.

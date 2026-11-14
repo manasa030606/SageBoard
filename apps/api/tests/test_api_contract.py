@@ -43,6 +43,7 @@ EXPECTED_OPERATIONS = {
     ("POST", "/conversations/{conversation_id}/sessions"),
     ("GET", "/analysis-sessions/{session_id}"),
     ("POST", "/analysis-sessions/{session_id}/cancel"),
+    ("GET", "/analysis-sessions/{session_id}/trace"),
     ("GET", "/history/sessions"),
     ("GET", "/history/queries"),
     ("GET", "/reports"),

@@ -9,15 +9,15 @@ Every call runs in its own transaction on the executor pool:
     <query>                              -- bind parameters only
     COMMIT;                              -- nothing to commit; SET LOCAL ends here
 
-Phase 3 uses this only for server-built statements (dataset preview). LLM-generated
-SQL will additionally pass the SQL Guard first (next phases); this module is the
+Server-built statements (dataset preview) and Guard-approved agent SQL both run here.
+Agent SQL passes the SQL Guard first (app.agent.tools.sql_guard); this module is the
 last line of defence, not the only one.
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -33,6 +33,7 @@ class ReadOnlyResult:
     rows: list[list[Any]]
     truncated: bool
     exec_ms: int
+    column_types: list[str] = field(default_factory=list)  # PostgreSQL type names
 
 
 def to_json_value(value: Any) -> Any:
@@ -64,7 +65,10 @@ async def run_readonly(
         await conn.execute(f"SET LOCAL statement_timeout = {int(timeout_ms)}")
         stmt = await conn.prepare(sql)
         records = await stmt.fetch(*params)
-        columns = [a.name for a in stmt.get_attributes()]
+        attributes = stmt.get_attributes()
+        columns = [a.name for a in attributes]
+        types = [a.type.name for a in attributes]
     truncated = len(records) > max_rows
     rows = [[to_json_value(v) for v in r.values()] for r in records[:max_rows]]
-    return ReadOnlyResult(columns, rows, truncated, int((time.perf_counter() - start) * 1000))
+    elapsed = int((time.perf_counter() - start) * 1000)
+    return ReadOnlyResult(columns, rows, truncated, elapsed, types)

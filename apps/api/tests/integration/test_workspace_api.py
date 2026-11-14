@@ -85,7 +85,7 @@ def test_conversation_lifecycle(api: TestClient) -> None:
     assert accepted.agent_available is False
     assert accepted.session.status == "queued"
     assert accepted.session.question == "What was revenue by region in 2026?"
-    assert "isn’t connected yet" in accepted.message
+    assert "no language model is configured" in accepted.message
 
     detail = ConversationDetail.model_validate(api.get(f"{API}/conversations/{convo.id}").json())
     assert detail.title == "What was revenue by region in 2026?"  # first question names it

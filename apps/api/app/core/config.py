@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -24,22 +24,22 @@ class Environment(StrEnum):
 
 
 class LLMProvider(StrEnum):
-    """LLM providers the adapter layer will support (implemented in Phase 5).
+    """LLM providers (adapters in ``app/agent/llm``).
 
-    ``mock`` is a deterministic, clearly labelled stand-in for development and
-    automated tests. It is refused in production (see ``_validate_llm``).
+    ``mock`` configures **no** model: questions stay queued (D42); refused in production.
+    ``google`` is the Gemini API (Google AI Studio keys); ``gemini`` is accepted as an alias.
     """
 
     MOCK = "mock"
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
-    GEMINI = "gemini"
+    GOOGLE = "google"
 
 
 _PROVIDER_KEY_FIELD: dict[LLMProvider, str] = {
     LLMProvider.ANTHROPIC: "anthropic_api_key",
     LLMProvider.OPENAI: "openai_api_key",
-    LLMProvider.GEMINI: "gemini_api_key",
+    LLMProvider.GOOGLE: "google_api_key",
 }
 
 
@@ -118,13 +118,41 @@ class Settings(BaseSettings):
     login_attempts_per_minute: int = Field(default=5, ge=1, le=1000)
     registrations_per_hour: int = Field(default=10, ge=1, le=10_000)
     uploads_per_hour: int = Field(default=20, ge=1, le=10_000)
+    analyses_per_hour: int = Field(default=30, ge=1, le=10_000)  # each run spends LLM tokens
 
-    # --- LLM (adapter implemented in Phase 5; configuration validated now) --
+    # --- LLM ---------------------------------------------------------------------
     llm_provider: LLMProvider = LLMProvider.MOCK
     llm_model: str | None = None
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
-    gemini_api_key: SecretStr | None = None
+    # Google AI Studio key. GOOGLE_API_KEY is the documented name; GEMINI_API_KEY works too.
+    google_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "google_api_key", "GOOGLE_API_KEY", "gemini_api_key", "GEMINI_API_KEY"
+        ),
+    )
+    llm_base_url: str | None = None  # override, e.g. an OpenAI-compatible gateway
+    llm_timeout_seconds: float = Field(default=60.0, ge=5, le=300)
+    # Reasoning ("thinking") models spend part of this budget before answering.
+    llm_max_output_tokens: int = Field(default=8192, ge=256, le=32_000)
+    # OpenAI-compatible providers (Gemini, OpenAI): how much the model reasons per call.
+    # "low" is faster and cheaper on quota; unset = the provider's default.
+    llm_reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] | None = None
+    # Some reasoning models reject a temperature parameter; set false for those.
+    llm_send_temperature: bool = True
+
+    # --- Agent budgets (per analysis session) --------------------------------
+    agent_max_llm_calls: int = Field(default=30, ge=5, le=200)
+    agent_max_sql_executions: int = Field(default=14, ge=1, le=100)
+    agent_deadline_seconds: int = Field(default=180, ge=10, le=1800)
+    agent_max_result_rows: int = Field(default=5000, ge=10, le=10_000)
+    # Free-tier protection (D50). Requests per minute are paced client-side so a run
+    # doesn't trip the provider's per-minute limit; the daily cap counts every model
+    # call recorded today (midnight Pacific, when Google's daily quota resets) and stops
+    # new questions once reached. 0 disables a limit.
+    llm_requests_per_minute: int = Field(default=10, ge=0, le=10_000)
+    llm_daily_request_limit: int = Field(default=200, ge=0, le=1_000_000)
 
     # ------------------------------------------------------------------ validators
     @field_validator("cors_origins", mode="before")
@@ -157,6 +185,11 @@ class Settings(BaseSettings):
         if not url.startswith("postgresql+asyncpg://"):
             raise ValueError("DATABASE_URL must use the async driver: postgresql+asyncpg://...")
         return value
+
+    @field_validator("llm_provider", mode="before")
+    @classmethod
+    def _provider_alias(cls, value: object) -> object:
+        return "google" if isinstance(value, str) and value.strip().lower() == "gemini" else value
 
     @model_validator(mode="after")
     def _validate_llm(self) -> Self:

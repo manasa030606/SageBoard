@@ -14,6 +14,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent.llm.client import StructuredLLM
+from app.agent.llm.factory import build_llm
+from app.agent.runner import RunManager, fail_interrupted_runs
 from app.api.v1.router import api_router
 from app.auth.ratelimit import RateLimiter
 from app.core.config import Settings, get_settings
@@ -26,15 +29,29 @@ from app.ingestion.uploads import sweep_stale
 log = get_logger(__name__)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+_FROM_SETTINGS = object()
+
+
+def create_app(
+    settings: Settings | None = None, *, agent_llm: StructuredLLM | object | None = _FROM_SETTINGS
+) -> FastAPI:
+    """``agent_llm`` overrides the model built from settings (tests inject a scripted one)."""
     settings = settings or get_settings()
     configure_logging(settings.log_level, json_output=settings.log_json)
+    llm = build_llm(settings) if agent_llm is _FROM_SETTINGS else agent_llm
+    run_manager = RunManager(settings=settings, llm=llm)  # type: ignore[arg-type]
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         databases = await open_databases(settings)
         app.state.databases = databases
         removed = sweep_stale(settings.upload_dir, settings.upload_ttl_minutes * 60)
+        interrupted = 0
+        if databases.sessions is not None:
+            try:
+                interrupted = await fail_interrupted_runs(databases.sessions)
+            except Exception as exc:  # the API still starts; /readyz reports the database
+                log.warning("startup.interrupted_runs_check_failed", error=type(exc).__name__)
         log.info(
             "startup",
             env=settings.env.value,
@@ -44,11 +61,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             executor_configured=databases.executor is not None,
             stale_uploads_removed=removed,
             llm_provider=settings.llm_provider.value,
+            agent_available=run_manager.available,
+            interrupted_runs_failed=interrupted,
             cors_origins=settings.cors_origins,
         )
         try:
             yield
         finally:
+            await run_manager.shutdown()
             await databases.close()
             log.info("shutdown")
 
@@ -65,6 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Default so dependencies work even before lifespan runs (e.g. some test clients).
     app.state.databases = Databases(app_engine=None, sessions=None, ingest=None, executor=None)
     app.state.rate_limiter = RateLimiter()
+    app.state.run_manager = run_manager
 
     # Middleware order: the last added runs first. CORS must wrap everything so that
     # error responses also carry CORS headers.

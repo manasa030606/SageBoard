@@ -16,6 +16,9 @@ dependencies = [
     "python-multipart>=0.0.33",
     "argon2-cffi>=25.1",
     "pyjwt>=2.15",
+    "langgraph>=1.2.22",
+    "sqlglot>=30.31",
+    "httpx>=0.28",
 ]
 
 [dependency-groups]

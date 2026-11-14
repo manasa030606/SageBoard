@@ -1,6 +1,13 @@
 """All ORM models. Importing this package registers every table on ``Base.metadata``."""
 
-from app.db.models.analysis import AnalysisSession, Conversation, Message, QueryExecution, Report
+from app.db.models.analysis import (
+    AgentNodeRun,
+    AnalysisSession,
+    Conversation,
+    Message,
+    QueryExecution,
+    Report,
+)
 from app.db.models.datasets import (
     Dataset,
     DatasetColumn,
@@ -11,6 +18,7 @@ from app.db.models.datasets import (
 from app.db.models.identity import AuditLog, DatabaseConnection, RefreshToken, User
 
 __all__ = [
+    "AgentNodeRun",
     "AnalysisSession",
     "AuditLog",
     "Conversation",

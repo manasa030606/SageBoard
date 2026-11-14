@@ -28,6 +28,7 @@ ORDER = [
     "conversations",
     "messages",
     "analysis_sessions",
+    "agent_node_runs",
     "query_executions",
     "reports",
 ]

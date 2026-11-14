@@ -20,6 +20,7 @@ from fastapi import Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.agent.runner import RunManager
 from app.auth.cookies import ACCESS_COOKIE, CSRF_COOKIE, CSRF_HEADER
 from app.auth.ratelimit import RateLimiter
 from app.auth.tokens import tokens_match
@@ -155,6 +156,26 @@ def upload_rate_limit() -> Callable[..., Awaitable[None]]:
         )
 
     return dependency
+
+
+def get_run_manager(request: Request) -> RunManager:
+    manager: RunManager = request.app.state.run_manager
+    return manager
+
+
+RunManagerDep = Annotated[RunManager, Depends(get_run_manager)]
+
+
+async def analysis_rate_limit(
+    user: CurrentUser, limiter: RateLimiterDep, settings: SettingsDep
+) -> None:
+    enforce(
+        limiter,
+        f"analysis:{user.id}",
+        settings.analyses_per_hour,
+        3600,
+        "You’ve asked a lot of questions in the last hour. Please wait a little before asking more.",
+    )
 
 
 def get_dataset_service(

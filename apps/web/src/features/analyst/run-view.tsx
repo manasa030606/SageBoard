@@ -120,9 +120,9 @@ function UnmatchedNotice({
 }) {
   return (
     <div className="grid gap-4">
-      <Notice tone="info" title="Live analysis isn’t connected yet">
+      <Notice tone="info" title="This page isn’t connected to the live agent yet">
         This preview runs on recorded sample runs, so it won’t invent an answer to a new question.
-        The real agent, which will write and validate SQL for any question, is built in a later
+        The analysis agent now runs on the server; connecting this workspace to it comes in a later
         phase.
       </Notice>
       {samples.length > 0 ? (

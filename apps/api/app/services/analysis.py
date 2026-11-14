@@ -1,8 +1,9 @@
-"""Conversations and analysis sessions.
+"""Conversations, analysis sessions and their agent traces.
 
-Phase 4 stores questions and session state; nothing executes them yet. The agent that
-moves a session from ``queued`` to a result arrives in a later phase, so creating a
-session says so explicitly (``agent_available=False``) instead of pretending to answer.
+Creating a session stores the question as ``queued``. When a language model is
+configured, the API then starts the LangGraph agent for it (``RunManager``); when none
+is configured the session stays queued and the response says so explicitly
+(``agent_available=False``) instead of pretending to answer.
 """
 
 from __future__ import annotations
@@ -15,17 +16,19 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.agent.usage import model_calls_today
 from app.api.pagination import decode_cursor, encode_cursor
 from app.core.errors import ConflictError, NotFoundError, ValidationFailedError
-from app.db.models import AnalysisSession, Conversation, Dataset, Message, User
+from app.db.models import AgentNodeRun, AnalysisSession, Conversation, Dataset, Message, User
 
 DEFAULT_TITLE = "New conversation"
 TITLE_FROM_QUESTION_CHARS = 80
 ACTIVE_STATUSES = ("queued", "running", "awaiting_input")
 AGENT_PENDING_MESSAGE = (
-    "Your question is saved. The analysis agent isn’t connected yet, so it will stay "
-    "queued until that feature is released."
+    "Your question is saved, but no language model is configured on the server "
+    "(LLM_PROVIDER=mock), so it stays queued. Nothing will be made up in the meantime."
 )
+AGENT_STARTED_MESSAGE = "Analysing your question. Follow progress in the session’s trace."
 
 
 class AnalysisService:
@@ -138,6 +141,20 @@ class AnalysisService:
         if run is None:
             raise NotFoundError("That analysis doesn’t exist.")
         return run
+
+    async def model_calls_today(self) -> int:
+        return await model_calls_today(self.session)
+
+    async def list_node_runs(self, owner: User, session_id: uuid.UUID) -> Sequence[AgentNodeRun]:
+        await self.get_session(owner, session_id)  # 404 unless it is the caller's
+        rows = await self.session.scalars(
+            select(AgentNodeRun)
+            .where(
+                AgentNodeRun.analysis_session_id == session_id, AgentNodeRun.owner_id == owner.id
+            )
+            .order_by(AgentNodeRun.seq)
+        )
+        return rows.all()
 
     async def cancel_session(self, owner: User, session_id: uuid.UUID) -> AnalysisSession:
         run = await self.get_session(owner, session_id)

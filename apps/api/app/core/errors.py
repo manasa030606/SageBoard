@@ -231,3 +231,11 @@ class RateLimitedError(AppError):
     def __init__(self, retry_after: int, message: str | None = None) -> None:
         super().__init__(message, details={"retry_after_seconds": retry_after})
         self.headers = {"Retry-After": str(retry_after)}
+
+
+class DailyModelLimitError(RateLimitedError):
+    code = "DAILY_BUDGET_EXCEEDED"
+    message = (
+        "Today's model request limit (LLM_DAILY_REQUEST_LIMIT) has been reached, so no new "
+        "analysis was started. It resets at midnight Pacific time."
+    )

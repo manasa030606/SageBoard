@@ -1,7 +1,9 @@
 """Conversations and the analysis sessions (questions) inside them.
 
-No agent runs yet: creating a session records the question as ``queued`` and the
-response says ``agent_available: false``. Nothing here fabricates an answer.
+Asking a question stores it as ``queued`` and, when a language model is configured,
+starts the LangGraph agent in the background (202 Accepted). Poll
+``GET /analysis-sessions/{id}`` for the result and ``…/trace`` for node-by-node progress.
+Without a configured model the session stays queued and the response says so.
 """
 
 from __future__ import annotations
@@ -11,14 +13,25 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Response, status
 
-from app.api.deps import AnalysisServiceDep, CurrentUser, csrf_protect
+from app.agent.usage import seconds_until_reset
+from app.api.deps import (
+    AnalysisServiceDep,
+    CurrentUser,
+    DatabasesDep,
+    RunManagerDep,
+    SettingsDep,
+    analysis_rate_limit,
+    csrf_protect,
+)
 from app.api.pagination import DEFAULT_LIMIT, CursorQuery, LimitQuery
+from app.core.errors import DailyModelLimitError
 from app.schemas.analysis import (
     ConversationCreate,
     ConversationDetail,
     ConversationPatch,
     ConversationSummary,
     MessageOut,
+    NodeRunOut,
     SessionAccepted,
     SessionCreate,
     SessionDetail,
@@ -26,7 +39,7 @@ from app.schemas.analysis import (
 )
 from app.schemas.common import Page
 from app.schemas.errors import ErrorResponse
-from app.services.analysis import AGENT_PENDING_MESSAGE
+from app.services.analysis import AGENT_PENDING_MESSAGE, AGENT_STARTED_MESSAGE
 
 router = APIRouter(tags=["conversations"], dependencies=[Depends(csrf_protect)])
 ERRORS: dict[int | str, dict[str, Any]] = {
@@ -122,17 +135,31 @@ async def delete_conversation(
     "/conversations/{conversation_id}/sessions",
     response_model=SessionAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    responses=ERRORS,
-    summary="Ask a question (recorded as a queued analysis session)",
+    responses={**ERRORS, 429: {"model": ErrorResponse}},
+    dependencies=[Depends(analysis_rate_limit)],
+    summary="Ask a question (starts the analysis agent when a model is configured)",
 )
 async def create_session(
-    conversation_id: uuid.UUID, body: SessionCreate, user: CurrentUser, service: AnalysisServiceDep
+    conversation_id: uuid.UUID,
+    body: SessionCreate,
+    *,
+    user: CurrentUser,
+    service: AnalysisServiceDep,
+    manager: RunManagerDep,
+    databases: DatabasesDep,
+    settings: SettingsDep,
 ) -> SessionAccepted:
+    limit = settings.llm_daily_request_limit
+    if manager.available and limit and await service.model_calls_today() >= limit:
+        raise DailyModelLimitError(seconds_until_reset())
     run = await service.create_session(user, conversation_id, body.question)
+    started = manager.available and databases.executor is not None
+    if started:
+        manager.start(run.id, databases)
     return SessionAccepted(
         session=SessionSummary.model_validate(run),
-        agent_available=False,
-        message=AGENT_PENDING_MESSAGE,
+        agent_available=started,
+        message=AGENT_STARTED_MESSAGE if started else AGENT_PENDING_MESSAGE,
     )
 
 
@@ -155,6 +182,20 @@ async def get_session(
     summary="Cancel a queued or running session (idempotent)",
 )
 async def cancel_session(
-    session_id: uuid.UUID, user: CurrentUser, service: AnalysisServiceDep
+    session_id: uuid.UUID, user: CurrentUser, service: AnalysisServiceDep, manager: RunManagerDep
 ) -> SessionDetail:
-    return SessionDetail.model_validate(await service.cancel_session(user, session_id))
+    run = await service.cancel_session(user, session_id)
+    manager.cancel(run.id)  # stops a running agent at its next node boundary
+    return SessionDetail.model_validate(run)
+
+
+@router.get(
+    "/analysis-sessions/{session_id}/trace",
+    response_model=list[NodeRunOut],
+    responses=ERRORS,
+    summary="The agent's node-by-node trace: status, duration, tool and model calls",
+)
+async def get_trace(
+    session_id: uuid.UUID, user: CurrentUser, service: AnalysisServiceDep
+) -> list[NodeRunOut]:
+    return [NodeRunOut.model_validate(r) for r in await service.list_node_runs(user, session_id)]

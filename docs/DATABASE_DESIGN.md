@@ -2,8 +2,8 @@
 
 | Field | Value |
 |---|---|
-| Document | DATABASE_DESIGN v0.4 |
-| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13) records the Phase 3 implementation (D26–D33); v0.4 (2026-11-14) adds the Phase 4 auth tables (migration 0004) |
+| Document | DATABASE_DESIGN v0.5 |
+| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13) records the Phase 3 implementation (D26–D33); v0.4 (2026-11-14) adds the Phase 4 auth tables (migration 0004); v0.5 (2026-11-14) adds the agent trace (migration 0005) |
 | Engine | PostgreSQL 16 — Neon in production, native PostgreSQL locally (Homebrew / Postgres.app; Docker optional). SQLAlchemy 2.x async + asyncpg, Alembic |
 | Permission model | [ADR-0002](adr/0002-database-topology-and-permissions.md) — roles in `infra/postgres/init/001_roles.sh`; per-dataset schemas and reader roles in `app/ingestion/warehouse.py` |
 | Source of truth | §4 is generated from the models: `uv run python scripts/schema_reference.py` (apps/api) |
@@ -59,7 +59,8 @@ users 1─┬─* refresh_tokens   (CASCADE; only SHA-256 hashes)     audit_log 
         │              ├─* dataset_relationships (from/to dataset_tables)
         │              └─* ingestion_jobs
         ├─* conversations 1─┬─* messages ─0..1→ analysis_sessions (SET NULL)
-        │   (dataset_id)    └─* analysis_sessions 1─* query_executions
+        │   (dataset_id)    └─* analysis_sessions 1─┬─* query_executions (every SQL attempt)
+        │                                           └─* agent_node_runs  (one row per node run)
         ├─* query_executions   (dataset_id; analysis_session_id nullable for previews)
         └─* reports            (analysis_session_id, dataset_id: SET NULL — reports outlive both)
 ```
@@ -307,6 +308,9 @@ Deletion behaviour (all verified in `tests/integration/test_models.py`):
 | duration_ms | integer |  |
 | started_at | timestamp with time zone |  |
 | finished_at | timestamp with time zone |  |
+| result | jsonb |  |
+| llm_provider | varchar(32) |  |
+| llm_model | varchar(120) |  |
 | created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
 
 - CHECK `ck_analysis_sessions_question_length`: `char_length(question) BETWEEN 1 AND 2000`
@@ -315,6 +319,26 @@ Deletion behaviour (all verified in `tests/integration/test_models.py`):
 - INDEX `ix_analysis_sessions_conversation_id` (conversation_id)
 - INDEX `ix_analysis_sessions_dataset_id` (dataset_id)
 - INDEX `ix_analysis_sessions_owner_id_created_at` (owner_id, created_at DESC)
+
+**agent_node_runs**
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | uuid | PK |
+| analysis_session_id | uuid | FK → analysis_sessions.id ON DELETE CASCADE, NOT NULL |
+| owner_id | uuid | FK → users.id ON DELETE CASCADE, NOT NULL |
+| seq | integer | NOT NULL |
+| node | varchar(40) | NOT NULL |
+| status | varchar(16) | NOT NULL |
+| started_at | timestamp with time zone | NOT NULL |
+| duration_ms | integer | NOT NULL |
+| summary | jsonb | NOT NULL |
+| tool_calls | jsonb | NOT NULL |
+| llm_calls | jsonb | NOT NULL |
+| error | text |  |
+
+- CHECK `ck_agent_node_runs_status`: `status IN ('succeeded', 'failed', 'degraded')`
+- UNIQUE INDEX `uq_agent_node_runs_session_seq` (analysis_session_id, seq)
 
 **query_executions**
 
@@ -425,6 +449,7 @@ The window is Nov 2024 – Oct 2026, across six US regions and six categories. B
 | 0002 | All 12 application tables, FKs, CHECKs, indexes (Phase 3) |
 | 0003 | `datasets.connection_id` FK → `NO ACTION DEFERRABLE INITIALLY DEFERRED` (found by the cascade test) |
 | 0004 | `refresh_tokens` (hashed, rotating, family id), `audit_log` (INET ip, jsonb meta), `users.last_login_at` (Phase 4) |
+| 0005 | `agent_node_runs` (node, status, duration, summary, tool and LLM calls; unique per session + seq) and `analysis_sessions.result` / `llm_provider` / `llm_model` (Phase 5) |
 
 Alembic manages `app` only. `ds_%` schemas are excluded by `include_object`, and the version table is `app.alembic_version`. Tests run `downgrade base → upgrade head` and `alembic check` (models == migrations) against a dedicated `sageboard_test` database.
 
@@ -434,8 +459,9 @@ These stay as designed in v0.2 and arrive with the phase that needs them. Nothin
 
 | Table(s) | Phase | Note |
 |---|---|---|
-| `run_events`, `run_steps`, `tool_calls`, `llm_calls` | 4–5 (agent) | Agent trace. `analysis_sessions` is the as-built name for v0.2's `analysis_runs` |
-| `query_results` | 4 | Stored result sets. `query_executions` (as built) is v0.2's `sql_queries` |
-| `visualizations`, `insights`, `insight_evidence` | 6–7 | |
+| ~~`run_steps`, `tool_calls`, `llm_calls`~~ | built in Phase 5 as one table | `agent_node_runs` holds each node's tool and LLM calls as JSONB (one row per node run). `analysis_sessions` is the as-built name for v0.2's `analysis_runs` |
+| `run_events` | 8 (streaming) | SSE replay log |
+| `query_results` | later | Full result sets. Phase 5 stores each step's ≤50-row preview and chart data (≤200 rows) in `analysis_sessions.result`; `query_executions` (as built) is v0.2's `sql_queries` |
+| ~~`visualizations`, `insights`, `insight_evidence`~~ | built in Phase 5 inside `result` | charts, facts, insights with evidence refs and the verification report are part of `analysis_sessions.result` (JSONB) |
 | `dashboard_widgets` | 8 | |
 | `user_settings`, `usage_counters` | Settings & hardening | `users.password_hash` stays nullable: the CLI demo user has no password and can't sign in |

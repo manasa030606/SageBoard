@@ -2,17 +2,17 @@
 
 | Field | Value |
 |---|---|
-| Document | API_SPECIFICATION v0.4 |
-| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13): §3 Datasets as built. v0.4 (2026-11-14): auth, conversations, analysis sessions, history, reports and readiness as built in Phase 4 (§0 lists every endpoint). Decisions: see DECISION_LOG.md |
+| Document | API_SPECIFICATION v0.5 |
+| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13): §3 Datasets as built. v0.4 (2026-11-14): auth, conversations, analysis sessions, history, reports and readiness as built in Phase 4 (§0 lists every endpoint). v0.5 (2026-11-14): sessions run the LangGraph agent; result and trace (Phase 5). Decisions: see DECISION_LOG.md |
 | Base URL | `https://<api-host>/api/v1` |
 | Format | JSON (UTF-8); `multipart/form-data` for uploads; `text/event-stream` for run events |
 | Source of truth | FastAPI-generated OpenAPI 3.1 at `/api/v1/openapi.json`. The frontend types are generated from it. |
 
 ---
 
-## 0. Implementation status (Phase 4)
+## 0. Implementation status (Phase 5)
 
-36 operations are live. Each is listed in the OpenAPI document and covered by tests (`tests/test_api_contract.py` fails if the route list changes without this doc).
+37 operations are live. Each is listed in the OpenAPI document and covered by tests (`tests/test_api_contract.py` fails if the route list changes without this doc).
 
 | Area | Live endpoints | Planned |
 |---|---|---|
@@ -21,7 +21,7 @@
 | Datasets | list, upload, finalize, get, `PATCH`, delete, schema, preview, jobs, table `PATCH`, column `PATCH`, `POST /datasets/demo` | — |
 | Connections | `GET /connections` | external PostgreSQL (post-MVP) |
 | Conversations | list, create, get, rename, delete | — |
-| Analysis sessions | `POST /conversations/{id}/sessions`, `GET /analysis-sessions/{id}`, `POST /analysis-sessions/{id}/cancel` | execution by the agent, SSE stream (§5), resume, rerun, trace |
+| Analysis sessions | `POST /conversations/{id}/sessions` (starts the agent), `GET /analysis-sessions/{id}` (incl. `result`), `POST /analysis-sessions/{id}/cancel`, `GET /analysis-sessions/{id}/trace` | SSE stream (§5), rerun, paged results |
 | History | `GET /history/sessions`, `GET /history/queries` | — |
 | Reports | list, create, get, `PATCH`, delete, `GET /reports/{id}/export.md` | — |
 | Dashboard, settings, usage | — | §8, §9 |
@@ -180,9 +180,10 @@ Readiness (`GET /readyz`) now reports `database`, `ingest_database`, `executor_d
 | GET | `/conversations/{id}` | — | `200 ConversationDetail` (messages + sessions) | 404 |
 | PATCH | `/conversations/{id}` | `{title}` | `200 ConversationDetail` | 404, 422 |
 | DELETE | `/conversations/{id}` | — | `204` (messages and sessions cascade) | 404 |
-| POST | `/conversations/{id}/sessions` | `{question}` (1–2000 chars, trimmed) | `202 SessionAccepted` | 404, 409 `DATASET_NOT_READY`, 422 `EMPTY_QUESTION` |
+| POST | `/conversations/{id}/sessions` | `{question}` (1–2000 chars, trimmed) | `202 SessionAccepted` | 404, 409 `DATASET_NOT_READY`, 422 `EMPTY_QUESTION`, 429 |
 | GET | `/analysis-sessions/{id}` | — | `200 SessionDetail` | 404 |
-| POST | `/analysis-sessions/{id}/cancel` | — | `200 SessionDetail` (idempotent) | 404, 409 `SESSION_NOT_CANCELLABLE` |
+| POST | `/analysis-sessions/{id}/cancel` | — | `200 SessionDetail` (idempotent; a running agent stops at its next node) | 404, 409 `SESSION_NOT_CANCELLABLE` |
+| GET | `/analysis-sessions/{id}/trace` | — | `200 NodeRun[]` in execution order (written live) | 404 |
 
 ```ts
 type ConversationSummary = { id: string; dataset_id: string; title: string; created_at: string; updated_at: string };
@@ -195,13 +196,36 @@ type SessionSummary = { id: string; conversation_id: string; dataset_id: string;
 type SessionDetail = SessionSummary & { dataset_version: number; termination_reason: string | null;
   understanding: object | null; plan: object | null; final_summary: string | null;
   error_code: string | null; error_message: string | null; llm_calls: number; sql_executions: number;
-  tokens_in: number; tokens_out: number; started_at: string | null; finished_at: string | null };
+  tokens_in: number; tokens_out: number; started_at: string | null; finished_at: string | null;
+  llm_provider: string | null; llm_model: string | null; result: RunResult | null };
 type SessionAccepted = { session: SessionSummary; agent_available: boolean; message: string };
+type NodeRun = { seq: number; node: string; status: "succeeded" | "failed" | "degraded";
+  started_at: string; duration_ms: number; summary: object; tool_calls: object[];
+  llm_calls: object[]; error: string | null };
+type RunResult = {
+  response: { status: "answered" | "partial" | "clarification_needed" | "out_of_scope" | "failed";
+    summary: string; key_findings: Insight[]; caveats: string[]; assumptions: string[];
+    clarification_question: string | null; clarification_options: string[];
+    summary_source: "model" | "template" };
+  steps: { step_id: string; purpose: string; expected_output: string; depends_on: string[];
+    status: "succeeded" | "failed" | "skipped" | "pending"; sql: string | null; explanation: string | null;
+    attempts: object[]; columns: { name: string; type: string }[]; row_count: number; truncated: boolean;
+    rows: unknown[][]; notes: string[]; failure_explanation: string | null }[];
+  facts: { fact_id: string; step_id: string; kind: string; description: string; value: unknown;
+    unit: string | null; inputs: object }[];
+  charts: (ChartSpec & { data: unknown[][]; columns: string[] })[];
+  verification: { round: number; metrics_check: string; time_period_check: string;
+    verified_insights: number; rejected_insights: number; removed: object[]; uncertainty: string[] } | null;
+  schema_tables: string[]; budget: object; errors: string[]; model: { provider: string; name: string } };
 ```
 
-**No agent yet.** Asking a question stores a user message and a `queued` session, and returns `agent_available: false` with a message saying so. Nothing answers it. The first question becomes the conversation's title if it still has the default one.
+**The agent (Phase 5).** Asking a question stores a user message and a `queued` session.
+- **With a model configured**, the API starts the LangGraph agent in the background and returns `agent_available: true`. The session moves `queued → running →` `succeeded` | `partial` | `awaiting_input` (a clarification question; the next message answers it and resumes the original question) | `failed` | `cancelled`.
+- **With `LLM_PROVIDER=mock`** no model exists: the session stays `queued`, with `agent_available: false` and a message saying so. Nothing is invented.
 
-**Planned with the agent phases (unchanged from v0.2):** execution, `GET /analysis-sessions/{id}/events` (SSE, §5), resume, rerun, trace, and paged query results.
+Poll `GET /analysis-sessions/{id}` (every 1–2 s) for the outcome and `…/trace` for node-by-node progress. On completion the assistant's summary is added to the conversation, and every SQL attempt appears in `GET /history/queries` (`origin = "agent"`). Runs left `running` by a server restart become `failed` with `error_code = "INTERRUPTED"`. If the model becomes unavailable, the run stops with `termination_reason = "llm_unavailable"` and `error_code` set to `LLM_QUOTA_EXCEEDED`, `LLM_MODEL_NOT_FREE`, `LLM_RATE_LIMITED`, `LLM_AUTH_FAILED` or `LLM_MODEL_NOT_FOUND`. A run started after the daily cap is reached ends `LLM_DAILY_LIMIT_REACHED` without calling the model. The first question becomes the conversation's title if it still has the default one. Workflow details: AGENT_WORKFLOW.md.
+
+**Still planned:** `GET /analysis-sessions/{id}/events` (SSE, §5, Phase 8), rerun, and paged query results.
 
 ## 5. Run event stream (SSE)
 
@@ -313,7 +337,11 @@ Database failures on any other route return `503 DATABASE_UNAVAILABLE` with a ge
 | `POST /auth/login` | 5 / min per IP + email, 20 / min per IP | `LOGIN_ATTEMPTS_PER_MINUTE` |
 | `POST /auth/register` | 10 / hour per IP | `REGISTRATIONS_PER_HOUR` |
 | `POST /datasets/uploads` | 20 / hour per user | `UPLOADS_PER_HOUR` |
-| Run creation, general API | planned (D20) | — |
+| `POST /conversations/{id}/sessions` | 30 / hour per user (each run spends model tokens) | `ANALYSES_PER_HOUR` |
+| Model calls per day (all users) | 200 since midnight Pacific → `429 DAILY_BUDGET_EXCEEDED` with `Retry-After` until the reset | `LLM_DAILY_REQUEST_LIMIT` |
+| Model requests per minute | paced client-side (requests wait, they're not refused) | `LLM_REQUESTS_PER_MINUTE` |
+| Per run | ≤ 30 model calls, ≤ 14 SQL executions, 180 s, ≤ 5,000 result rows | `AGENT_MAX_LLM_CALLS`, `AGENT_MAX_SQL_EXECUTIONS`, `AGENT_DEADLINE_SECONDS`, `AGENT_MAX_RESULT_ROWS` |
+| General API | planned (D20) | — |
 
 Over the limit → `429 RATE_LIMITED` with a `Retry-After` header (exposed through CORS) and `details.retry_after_seconds`.
 
