@@ -173,6 +173,27 @@ nightly.yml: eval suite with real LLM (secret) → eval_report.json artifact; re
 - `tests/integration/test_phase8_history_reports.py`: history persistence (including across an application restart), search over question/answer/dataset, report snapshot v2, PDF text extraction of all ten sections and of stored figures (checked against the uploaded CSV, not against report code), an edited summary with an invented number flagged, markup/NUL/CJK injection safe, reports and history private to their owner.
 - A PDF is rasterised and looked at when its layout changes; text extraction alone does not show a stranded heading or a legend without colours.
 
+## 10b. Phase 9 additions (evaluation and test levels)
+
+Where each requested level lives, with counts from the final run in this repository:
+
+| Level | Location | Notes |
+|---|---|---|
+| Backend unit and service tests | `apps/api/tests/*.py`, `tests/agent/` | 669 backend tests in total (incl. the rows below), all passing |
+| Agent-node unit tests | `tests/agent/test_nodes.py`, `test_sensitive_masking.py` | scripted model; masking asserted on the payload text |
+| SQL validation | `tests/agent/test_sql_guard.py` (adversarial, benign, 12 Cartesian-join cases), `test_sql_guard_fuzz.py`, `test_eval_attack_corpus.py` (69 attacks) | each attack asserted rejected |
+| LangGraph integration | `tests/agent/test_graph_mock.py`, `tests/integration/test_eval_pipeline.py` | the latter runs 8 real cases through API + graph + PostgreSQL |
+| API integration | `tests/integration/` | real PostgreSQL, real roles |
+| Time-zone regression | `tests/integration/test_seed_and_permissions.py::test_executor_pins_session_timezone_to_utc` | fails without the fix |
+| Frontend component tests | `apps/web/src/**/*.test.tsx` | 94 web tests in total (states, button, toast, result table, tabs, API client) |
+| End to end | `apps/web/e2e/analyst-flow.spec.ts` (Playwright, 5 tests) | real Next.js + FastAPI + PostgreSQL, oracle model (D61) |
+| Adversarial and security | `evals/safety.py`, cases X01–X08 | Guard rate, database-layer isolation with the Guard bypassed, pipeline cases |
+| Evaluation | `apps/api/evals/`, `docs/eval/` | 62 cases, nine metrics, oracle and live modes (D56) |
+
+Deviation from §7: the golden set is Python (`evals/cases.py`), exported to `docs/eval/dataset/retail_v1.<scale>.json`, instead of `packages/eval-datasets/golden/retail_v1.yaml`, because the expected results are computed by code (D57).
+
+The comparator is tested (`tests/test_eval_compare.py`). A test that passes on its first run is not trusted until it has failed once for the right reason; the Save-as-report E2E test was shown to fail when the earlier GET/POST bug is reintroduced.
+
 ## 11. Test data management
 - The sample dataset generator is seeded and deterministic; its checksum is asserted in tests.
 - Fixtures: `user_factory`, `dataset_factory(csv_text | sample)`, `run_factory`.

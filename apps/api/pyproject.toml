@@ -70,6 +70,9 @@ allowed-confusables = ["’", "–", "×", "−", "«", "»"]
 # The synthetic generator is a table of business probabilities; naming each one adds noise.
 # Its RNG is seeded for reproducibility, never used for security.
 "app/seed/ecommerce.py" = ["PLR2004", "S311"]
+# Dev-only evaluation tooling (never imported by app): asserts guard harness invariants,
+# and reference SQL / the attack corpus are literal strings by design.
+"evals/**" = ["S101", "S105", "S608", "PLR2004", "PLC0415", "RUF001"]
 
 [tool.ruff.format]
 quote-style = "double"

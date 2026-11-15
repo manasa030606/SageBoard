@@ -218,6 +218,7 @@ class SchemaTools:
             data_type=c.data_type,
             description=c.description,
             is_primary_key=c.is_primary_key,
+            is_sensitive=c.is_sensitive,
             null_pct=c.null_pct,
             distinct_count=c.distinct_count,
             sample_values=list(c.samples[:10]),

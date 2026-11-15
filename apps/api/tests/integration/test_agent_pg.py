@@ -219,6 +219,8 @@ async def _truth(pg: PgUrls, schema: str) -> dict[str, tuple[float, float]]:
     conn = await asyncpg.connect(PgUrls.dsn(pg.ingest))
     try:
         await conn.execute(f'SET search_path = "{schema}"')
+        # the executor runs in UTC (D59); the expectation must not depend on the server's zone
+        await conn.execute("SET TIME ZONE 'UTC'")
         rows = await conn.fetch(GOOD_SQL)
         return {
             r["category"]: (float(r["revenue_before"] or 0), float(r["revenue_after"] or 0))

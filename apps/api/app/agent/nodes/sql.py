@@ -14,6 +14,7 @@ from app.agent.nodes.common import (
     plan_steps,
     put_step,
     schema_for_prompt,
+    sensitive_columns,
     step_payload,
     understanding_payload,
 )
@@ -65,7 +66,9 @@ async def generate_sql(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
         parts.append(("earlier_steps", earlier))
     deps = [state["step_results"][d] for d in step.depends_on if d in state["step_results"]]
     if deps:
-        parts.append(("dependency_results", [step_payload(d) for d in deps]))
+        parts.append(
+            ("dependency_results", [step_payload(d, hidden=sensitive_columns(state)) for d in deps])
+        )
     parts.append(f"Write the SQL for step {step.step_id}.")
     draft = await ctx.llm(load_prompt("generate_sql"), render(*parts), SQLDraft)
     result.attempts.append(

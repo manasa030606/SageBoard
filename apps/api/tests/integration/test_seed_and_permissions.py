@@ -194,3 +194,34 @@ def test_reader_role_cannot_log_in_and_is_scoped(pg: PgUrls, demo: Any) -> None:
     )
     assert rows[0]["rolcanlogin"] is False
     assert rows[0]["rolinherit"] is False
+
+
+def test_executor_pins_session_timezone_to_utc(pg: PgUrls, demo: Any) -> None:
+    """A non-UTC server/role default must not shift which month or day a timestamp falls in."""
+
+    async def read() -> list[Any]:
+        pool = await asyncpg.create_pool(
+            PgUrls.dsn(pg.executor),
+            min_size=0,
+            max_size=1,
+            server_settings={"timezone": "Asia/Kolkata"},
+        )
+        try:
+            result = await run_readonly(
+                pool,
+                schema=demo.dataset.schema_name,
+                reader_role=demo.dataset.reader_role,
+                sql=(
+                    "SELECT current_setting('TimeZone') AS tz, "
+                    "to_char(TIMESTAMPTZ '2026-10-31 20:00:00+00', 'YYYY-MM-DD') AS day"
+                ),
+                params=[],
+                max_rows=10,
+                timeout_ms=5000,
+            )
+            return list(result.rows[0])
+        finally:
+            await pool.close()
+
+    # Kolkata (UTC+5:30) would say 2026-11-01 for this instant.
+    assert run(read()) == ["UTC", "2026-10-31"]

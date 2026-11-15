@@ -7,7 +7,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.agent.nodes.common import plan_steps, step_payload, understanding_payload
+from app.agent.nodes.common import (
+    plan_steps,
+    sensitive_columns,
+    step_payload,
+    understanding_payload,
+)
 from app.agent.prompts import load_prompt, render
 from app.agent.runtime import NodeContext
 from app.agent.state import AgentState, ComputedFact
@@ -68,7 +73,10 @@ def _fact_brief(fact: ComputedFact) -> dict[str, Any]:
 async def analyze_results(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     engine = _engine(state, ctx)
     await _auto_facts(state, ctx, engine)
-    payloads = [step_payload(state["step_results"][k]) for k in sorted(engine.tables)]
+    payloads = [
+        step_payload(state["step_results"][k], hidden=sensitive_columns(state))
+        for k in sorted(engine.tables)
+    ]
     selection = await ctx.llm(
         load_prompt("analyze_results"),
         render(

@@ -1,0 +1,63 @@
+{
+  "scale": "small",
+  "rows": "customers 300, order_items 4,168, orders 2,267, payments 2,398, products 40",
+  "repeats": 5,
+  "measurements": {
+    "Guard validation (ms per statement)": {
+      "p50": 1.0197090450674295,
+      "p95": 2.114332979544997,
+      "mean": 1.3959284250934918,
+      "count": 270
+    },
+    "Query execution, per reference query (ms, median of repeats)": {
+      "p50": 1.0,
+      "p95": 3.0,
+      "mean": 1.1296296296296295,
+      "count": 54
+    },
+    "Query round trip incl. EXPLAIN cost gate (ms)": {
+      "p50": 2.5303750298917294,
+      "p95": 4.928583046421409,
+      "mean": 2.7565421239059003,
+      "count": 270
+    }
+  },
+  "cartesian": [
+    {
+      "name": "comma join, 2 tables",
+      "guard_ok": false,
+      "status": "ok",
+      "sqlstate": null,
+      "plan_cost": null,
+      "ms": 17.89737492799759
+    },
+    {
+      "name": "CROSS JOIN, 2 tables",
+      "guard_ok": false,
+      "status": "ok",
+      "sqlstate": null,
+      "plan_cost": null,
+      "ms": 18.05725006852299
+    },
+    {
+      "name": "comma join, 3 tables",
+      "guard_ok": false,
+      "status": "error",
+      "sqlstate": "COST_LIMIT",
+      "plan_cost": 42528504.78,
+      "ms": 2.158625051379204
+    },
+    {
+      "name": "join with ON (true)",
+      "guard_ok": false,
+      "status": "ok",
+      "sqlstate": null,
+      "plan_cost": null,
+      "ms": 245.08429097477347
+    }
+  ],
+  "notes": [
+    "Slowest reference queries by median execution time: M01.s1 (3 ms), M02.s1 (3 ms), M02.s2 (3 ms)",
+    "Cost-gate probe: The Guard rejected 4/4 Cartesian-product statements. With the Guard bypassed, the EXPLAIN cost gate (5,000,000) alone stopped 1/4 before they returned rows; these ran to completion: comma join, 2 tables, CROSS JOIN, 2 tables, join with ON (true)."
+  ]
+}

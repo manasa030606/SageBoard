@@ -63,6 +63,8 @@ async def run_readonly(
         await conn.execute(f"SET LOCAL ROLE {quote_ident(role)}")
         await conn.execute(f"SET LOCAL search_path = {quote_ident(schema)}")
         await conn.execute(f"SET LOCAL statement_timeout = {int(timeout_ms)}")
+        # Fixed so dates, EXTRACT and to_char do not depend on the server or role default.
+        await conn.execute("SET LOCAL TIME ZONE 'UTC'")
         stmt = await conn.prepare(sql)
         records = await stmt.fetch(*params)
         attributes = stmt.get_attributes()

@@ -69,6 +69,8 @@ class ColumnContext(BaseModel):
     data_type: str
     description: str | None = None
     is_primary_key: bool = False
+    # Personal data: values of this column are never sent to the model (SECURITY_DESIGN §6).
+    is_sensitive: bool = False
     null_pct: float | None = None
     distinct_count: int | None = None
     sample_values: list[str] = Field(default_factory=list)

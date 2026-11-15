@@ -139,3 +139,42 @@ def test_unknown_column_feedback_says_where_the_column_is() -> None:
 def test_unknown_table_suggests_a_close_match() -> None:
     result = validate_sql("SELECT * FROM order", POLICY)
     assert any("Did you mean orders" in v.message for v in result.violations)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT COUNT(*) FROM customers c, orders o",
+        "SELECT COUNT(*) FROM customers c CROSS JOIN orders o",
+        "SELECT COUNT(*) FROM orders o JOIN order_items oi ON TRUE",
+        "SELECT COUNT(*) FROM customers c, orders o, order_items oi",
+        "SELECT * FROM orders a, orders b, orders c, order_items d",
+        "SELECT COUNT(*) FROM customers c JOIN orders o ON o.customer_id = c.customer_id, order_items oi",
+    ],
+)
+def test_join_without_a_condition_is_rejected(sql: str) -> None:
+    result = validate_sql(sql, POLICY)
+    assert not result.ok
+    assert [v.code for v in result.violations] == ["CARTESIAN_JOIN"]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT COUNT(*) FROM customers c JOIN orders o ON o.customer_id = c.customer_id",
+        "SELECT COUNT(*) FROM customers c JOIN orders o USING (customer_id)",
+        "SELECT COUNT(*) FROM customers c, orders o WHERE c.customer_id = o.customer_id",
+        # a one-row subquery or CTE is the usual way to get a share of the total
+        "SELECT o.status, COUNT(*) * 1.0 / t.n AS share FROM orders o "
+        "CROSS JOIN (SELECT COUNT(*) AS n FROM orders) t GROUP BY o.status, t.n",
+        "WITH t AS (SELECT COUNT(*) AS n FROM orders) "
+        "SELECT o.status, COUNT(*) * 1.0 / t.n FROM orders o CROSS JOIN t GROUP BY o.status, t.n",
+    ],
+)
+def test_joins_with_a_condition_or_one_row_totals_are_accepted(sql: str) -> None:
+    assert validate_sql(sql, POLICY).ok
+
+
+def test_cartesian_message_tells_the_model_how_to_fix_it() -> None:
+    result = validate_sql("SELECT COUNT(*) FROM customers c, orders o", POLICY)
+    assert "Join on a key" in result.violations[0].message

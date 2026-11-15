@@ -152,6 +152,7 @@ def validate_sql(sql: str, policy: GuardPolicy) -> GuardResult:
     used: list[str] = []
     violations = [
         *_statement_violations(root),
+        *_cartesian_violations(root),
         *_table_violations(root, policy, used),
         *_function_violations(root),
     ]
@@ -229,6 +230,65 @@ def _statement_violations(root: exp.Expression) -> list[GuardViolation]:
             GuardViolation(code="LOCKING_CLAUSE", message="FOR UPDATE/SHARE is not allowed.")
         )
     return out
+
+
+def _is_true_literal(node: exp.Expression | None) -> bool:
+    return isinstance(node, exp.Boolean) and bool(node.this)
+
+
+def _linked_by_where(select: exp.Select) -> bool:
+    """True when WHERE equates columns of two different tables (an old-style comma join)."""
+    where = select.args.get("where")
+    if where is None:
+        return False
+    for eq in where.find_all(exp.EQ):
+        left, right = eq.left, eq.right
+        if (
+            isinstance(left, exp.Column)
+            and isinstance(right, exp.Column)
+            and left.table != right.table
+        ):
+            return True
+    return False
+
+
+def _cartesian_violations(root: exp.Expression) -> list[GuardViolation]:
+    """Reject a join of two base tables that has no join condition.
+
+    A CROSS JOIN against a subquery or CTE (e.g. a one-row grand total) stays allowed: it is
+    the usual way to compute a share of the total and cannot multiply a large table by another.
+    """
+    ctes = {c.alias_or_name for c in root.find_all(exp.CTE)}
+
+    def is_base_table(node: exp.Expression | None) -> bool:
+        return isinstance(node, exp.Table) and node.name not in ctes
+
+    for select in root.find_all(exp.Select):
+        source = select.args.get("from_") or select.args.get("from")
+        left_is_base = source is not None and is_base_table(source.this)
+        for join in select.args.get("joins") or []:
+            right_is_base = is_base_table(join.this)
+            has_condition = join.args.get("using") or (
+                join.args.get("on") is not None and not _is_true_literal(join.args["on"])
+            )
+            if (
+                right_is_base
+                and left_is_base
+                and not has_condition
+                and not _linked_by_where(select)
+            ):
+                return [
+                    GuardViolation(
+                        code="CARTESIAN_JOIN",
+                        message=(
+                            f"Table “{join.this.name}” is joined without a join condition, which "
+                            "pairs every row with every row. Join on a key, e.g. "
+                            "orders.customer_id = customers.customer_id."
+                        ),
+                    )
+                ]
+            left_is_base = left_is_base or right_is_base
+    return []
 
 
 def _subquery_depth(root: exp.Expression) -> int:

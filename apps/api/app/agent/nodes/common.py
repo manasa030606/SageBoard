@@ -47,8 +47,33 @@ def schema_for_prompt(context: SchemaContext) -> dict[str, Any]:
     return {"tables": tables, "join_paths": context.join_paths}
 
 
-def step_payload(result: StepResult, rows: int = PROMPT_PREVIEW_ROWS) -> dict[str, Any]:
-    return {
+HIDDEN = "«redacted»"
+
+
+def sensitive_columns(state: AgentState) -> frozenset[str]:
+    """Lower-cased names of columns the dataset marks sensitive (personal data).
+
+    Matched by result column *name*, so a query that aliases a sensitive column
+    (``SELECT email AS contact``) is not caught; see SECURITY_DESIGN §6.
+    """
+    context = state.get("schema_context")
+    if context is None:
+        return frozenset()
+    return frozenset(c.column.lower() for c in context.columns if c.is_sensitive)
+
+
+def step_payload(
+    result: StepResult, rows: int = PROMPT_PREVIEW_ROWS, hidden: frozenset[str] = frozenset()
+) -> dict[str, Any]:
+    """A step's result as sent to the model. Values in sensitive columns never leave the server."""
+    masked = [i for i, (name, _) in enumerate(result.columns) if name.lower() in hidden]
+
+    def row_values(values: list[Any]) -> list[Any]:
+        if not masked:
+            return values
+        return [HIDDEN if i in masked else v for i, v in enumerate(values)]
+
+    payload: dict[str, Any] = {
         "step_id": result.step_id,
         "status": result.status,
         # names and types as separate fields: a combined "name (type)" label gets copied
@@ -56,9 +81,15 @@ def step_payload(result: StepResult, rows: int = PROMPT_PREVIEW_ROWS) -> dict[st
         "columns": [{"name": name, "type": pg} for name, pg in result.columns],
         "row_count": result.row_count,
         "truncated": result.truncated,
-        "rows": [{"row_index": i, "values": r} for i, r in enumerate(result.preview_rows[:rows])],
+        "rows": [
+            {"row_index": i, "values": row_values(r)}
+            for i, r in enumerate(result.preview_rows[:rows])
+        ],
         "notes": result.notes,
     }
+    if masked:
+        payload["hidden_columns"] = [result.columns[i][0] for i in masked]
+    return payload
 
 
 def understanding_payload(state: AgentState) -> dict[str, Any]:

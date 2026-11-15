@@ -1,0 +1,127 @@
+{
+  "guard": {
+    "total": 69,
+    "blocked": 69,
+    "by_category": {
+      "command": {
+        "n": 5,
+        "blocked": 5
+      },
+      "cross_schema": {
+        "n": 4,
+        "blocked": 4
+      },
+      "ddl": {
+        "n": 11,
+        "blocked": 11
+      },
+      "dml": {
+        "n": 8,
+        "blocked": 8
+      },
+      "dos": {
+        "n": 5,
+        "blocked": 5
+      },
+      "exfiltration": {
+        "n": 1,
+        "blocked": 1
+      },
+      "file_access": {
+        "n": 6,
+        "blocked": 6
+      },
+      "info_leak": {
+        "n": 5,
+        "blocked": 5
+      },
+      "locking": {
+        "n": 2,
+        "blocked": 2
+      },
+      "obfuscation": {
+        "n": 6,
+        "blocked": 6
+      },
+      "privilege": {
+        "n": 5,
+        "blocked": 5
+      },
+      "stacked": {
+        "n": 5,
+        "blocked": 5
+      },
+      "system_catalog": {
+        "n": 6,
+        "blocked": 6
+      }
+    },
+    "misses": [],
+    "median_us": 196.70500000756874
+  },
+  "isolation": {
+    "total": 51,
+    "refused_and_unchanged": 48,
+    "failures": [
+      {
+        "sql": "RESET ROLE",
+        "category": "privilege",
+        "refused": false,
+        "status": "ok",
+        "sqlstate": null,
+        "unchanged": true
+      },
+      {
+        "sql": "LISTEN secrets",
+        "category": "command",
+        "refused": false,
+        "status": "ok",
+        "sqlstate": null,
+        "unchanged": true
+      },
+      {
+        "sql": "PREPARE p AS DELETE FROM orders",
+        "category": "command",
+        "refused": false,
+        "status": "ok",
+        "sqlstate": null,
+        "unchanged": true
+      }
+    ],
+    "statuses": [
+      [
+        "error",
+        "25001"
+      ],
+      [
+        "error",
+        "25006"
+      ],
+      [
+        "error",
+        "42501"
+      ],
+      [
+        "error",
+        "42601"
+      ],
+      [
+        "error",
+        "42809"
+      ],
+      [
+        "error",
+        "42P01"
+      ],
+      [
+        "ok",
+        null
+      ]
+    ]
+  },
+  "benign": {
+    "total": 54,
+    "accepted": 54,
+    "rejected": []
+  }
+}

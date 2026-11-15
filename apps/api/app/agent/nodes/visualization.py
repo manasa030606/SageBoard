@@ -8,7 +8,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.agent.nodes.common import plan_steps, step_payload, understanding_payload
+from app.agent.nodes.common import (
+    plan_steps,
+    sensitive_columns,
+    step_payload,
+    understanding_payload,
+)
 from app.agent.prompts import load_prompt, render
 from app.agent.runtime import NodeContext
 from app.agent.state import AgentState, ChartSpec
@@ -32,12 +37,13 @@ def _succeeded(state: AgentState) -> list[str]:
 async def generate_visualization(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     steps = _succeeded(state)
     results = state["step_results"]
+    hidden = sensitive_columns(state)
     selection = await ctx.llm(
         load_prompt("generate_visualization"),
         render(
             ("question", state["question"]),
             ("understanding", understanding_payload(state)),
-            ("results", [step_payload(results[s], rows=8) for s in steps]),
+            ("results", [step_payload(results[s], rows=8, hidden=hidden) for s in steps]),
         ),
         ChartSelection,
     )

@@ -6,7 +6,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.agent.nodes.common import plan_steps, step_payload, understanding_payload
+from app.agent.nodes.common import (
+    plan_steps,
+    sensitive_columns,
+    step_payload,
+    understanding_payload,
+)
 from app.agent.prompts import load_prompt, render
 from app.agent.runtime import NodeContext
 from app.agent.state import AgentState, EvidenceRef, Insight
@@ -39,13 +44,14 @@ def step_status_notes(state: AgentState) -> list[str]:
 
 async def generate_insights(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     results = state["step_results"]
+    hidden = sensitive_columns(state)
     succeeded = [s.step_id for s in plan_steps(state) if results[s.step_id].status == "succeeded"]
     parts: list[str | tuple[str, Any]] = [
         ("question", state["question"]),
         ("understanding", understanding_payload(state)),
         ("plan", state["plan"].model_dump()),
         ("facts", [f.model_dump() for f in state.get("facts", [])]),
-        ("results", [step_payload(results[s]) for s in succeeded]),
+        ("results", [step_payload(results[s], hidden=hidden) for s in succeeded]),
     ]
     if notes := step_status_notes(state):
         parts.append(("step_notes", notes))

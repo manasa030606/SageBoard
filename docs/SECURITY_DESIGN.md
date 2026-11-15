@@ -111,7 +111,7 @@ Any other function → `FUNCTION_NOT_ALLOWED:<name>`. Covered by this: `pg_sleep
 |---|---|---|
 | Max joins | 6 | `TOO_MANY_JOINS` |
 | Max subquery depth | 4 | `TOO_DEEP` |
-| CROSS JOIN / comma join with no join predicate between non-trivial tables | rejected | `CARTESIAN_JOIN` |
+| CROSS JOIN / comma join with no join predicate between non-trivial tables | rejected | `CARTESIAN_JOIN` — **implemented in Phase 9** (D60); before that the rule existed only on paper and the EXPLAIN cost gate alone let two-table cross joins run. Rejected: a join of two real tables with no `ON`/`USING`, `ON TRUE`, and no column-equals-column in `WHERE`. Allowed: `CROSS JOIN` to a subquery or CTE (share of total). |
 | Max projected columns | 50 | `TOO_MANY_COLUMNS` |
 | `SELECT *` | allowed only on single-table queries; rewritten to an explicit column list without `_row_id` | — |
 
@@ -130,7 +130,7 @@ For every case in the adversarial corpus: `validate(...).accepted is False`. For
 | `sageboard_owner` | yes (migrations/bootstrap only) | owns `app`, `lg`; CREATEROLE |
 | `sageboard_app` | yes (API service) | DML on `app.*`, `lg.*`; **no** access to `ds_*` |
 | `sageboard_ingest` | yes (ingestion code path, separate pool) | CREATE on the database (to create `ds_*` schemas); owns those schemas |
-| `sageboard_executor` | yes (Executor pool only) | **No direct privileges**; member of each `ds_<id>_r`; `NOINHERIT` so it must `SET ROLE` explicitly |
+| `sageboard_executor` | yes (Executor pool only) | **No direct privileges**; member of each `ds_<id>_r`; `NOINHERIT` so it must `SET ROLE` explicitly. Each transaction also sets `TIME ZONE 'UTC'` (Phase 9, D59) |
 | `ds_<id>_r` | no | USAGE on `ds_<id>`, SELECT on its tables |
 
 Hardening: `REVOKE ALL ON SCHEMA public FROM PUBLIC; REVOKE TEMP ON DATABASE ... FROM PUBLIC;` and `REVOKE EXECUTE` on dangerous functions from PUBLIC where the provider allows it.
@@ -159,7 +159,7 @@ Fallback if per-dataset roles cannot be administered on the chosen plan: one `sa
 |---|---|
 | Output as untrusted input | All outputs validated by Pydantic schemas; SQL by the Guard; chart specs by the spec validator; insights by the verifier. |
 | Prompt-injection containment | Dataset-derived strings (names, descriptions, sample values) are wrapped in `<data>` blocks, escaped, and truncated (descriptions ≤ 300 chars, values ≤ 80 chars). The system prompt says data blocks never contain instructions. Containment doesn't depend on the model obeying, because no LLM output can do more than a validated SELECT on the user's own data. |
-| Data minimisation | The LLM sees schema, profiles, ≤ 50-row previews and computed facts. Columns flagged `is_sensitive` never have sample values or preview cells sent; they're masked as `«redacted»`. |
+| Data minimisation | The LLM sees schema, profiles, ≤ 50-row previews and computed facts. Columns flagged `is_sensitive` never have sample values or preview cells sent; they're masked as `«redacted»`. **As built (Phase 9, D58):** the schema tools always hid sample values, but result rows were not masked until the evaluation (case X02) found customer emails in model prompts; masking now covers all five model-bound payloads. Limits: matched by result column name (an aliased column escapes); stored results shown to the owner are not masked. |
 | No secrets in prompts | Prompts are assembled from an allowlisted context builder; settings/env are never interpolated. |
 | Provider settings | Use providers' zero-data-retention or no-training options where available; document the provider's data policy in the README (D1). |
 | Budget | Per-run caps (AGENT_WORKFLOW §5.4) plus per-user daily token cap. |
@@ -188,7 +188,7 @@ Fallback if per-dataset roles cannot be administered on the chosen plan: one `sa
 - **Frontend:** all data is fetched client-side with `credentials: "include"`. The app area waits for `/auth/me` before rendering. A session change (sign-in, sign-out or expiry) triggers a full page load, so no client-side state from the previous session survives. After sign-in the app only redirects to same-app paths (`/app…`), never another site.
 
 **Planned:**
-- Content Security Policy and other security headers (Phase 14).
+- Content Security Policy and other security headers (Phase 15).
 - Password change and account deletion (deletion must also drop the user's warehouse schemas).
 - Email verification and password reset.
 - Rate limits shared across instances.
@@ -210,7 +210,7 @@ Fallback if per-dataset roles cannot be administered on the chosen plan: one `sa
 - The whole load (schema, role, table, COPY, grants, catalog) is one transaction. Any failure leaves no schema, role or rows behind (tested).
 
 **Planned:** XLSX (openpyxl `read_only=True, data_only=True` after a zip size/ratio check, reject > 100:1 or > 500 MB uncompressed, ≤ 10 sheets; macros and external links ignored), MIME/magic-byte sniffing, and moving ingestion to a background worker.
-- **CSV export (Phase 13):** cells starting with `= + - @ \t \r` are prefixed with `'` (formula-injection mitigation).
+- **CSV export (Phase 14):** cells starting with `= + - @ \t \r` are prefixed with `'` (formula-injection mitigation).
 
 ## 9. No code execution policy
 - The codebase has no `eval`, `exec`, `compile`, `subprocess`, `os.system` or `pickle.loads` on dynamic input. A CI check enforces this (ruff `S` rules: S102, S307, S602–S607, S301, plus a custom grep gate on `app/`).

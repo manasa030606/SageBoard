@@ -28,7 +28,12 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
 from app.agent.llm.client import LLMError
-from app.agent.nodes.common import plan_steps, step_payload, understanding_payload
+from app.agent.nodes.common import (
+    plan_steps,
+    sensitive_columns,
+    step_payload,
+    understanding_payload,
+)
 from app.agent.prompts import load_prompt, render
 from app.agent.runtime import BudgetExhaustedError, NodeContext
 from app.agent.state import AgentState, Insight, VerificationReport
@@ -133,6 +138,7 @@ async def verify_insights(state: AgentState, ctx: NodeContext) -> dict[str, Any]
     # pass 2: model judge (reject-only)
     candidates = [i for i in insights if i.verification == "unverified"]
     judge_notes: list[str] = []
+    hidden = sensitive_columns(state)
     if candidates:
         try:
             verdict = await ctx.llm(
@@ -144,7 +150,9 @@ async def verify_insights(state: AgentState, ctx: NodeContext) -> dict[str, Any]
                     (
                         "results",
                         [
-                            step_payload(state["step_results"][q["step_id"]], rows=10)
+                            step_payload(
+                                state["step_results"][q["step_id"]], rows=10, hidden=hidden
+                            )
                             for q in executed_queries(state)
                         ],
                     ),
