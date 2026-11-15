@@ -33,6 +33,7 @@ from sqlalchemy.orm import selectinload
 
 from app.agent.graph import build_graph, initial_state, run_graph
 from app.agent.llm.client import StructuredLLM
+from app.agent.memory import SCAN_TURNS, build_turn_memory, select_relevant
 from app.agent.nodes.common import plan_steps
 from app.agent.runtime import AgentDeps
 from app.agent.state import AgentState, Budget, NodeEvent, SQLAttempt
@@ -53,7 +54,6 @@ from app.db.models import (
 
 log = structlog.get_logger("app.agent.runner")
 
-PRIOR_TURNS = 3
 CHART_DATA_ROWS = 200
 STATUS_FOR_RESPONSE = {
     "answered": "succeeded",
@@ -160,17 +160,26 @@ class AgentRunner:
     async def _conversation_context(
         self, db: AsyncSession, run: AnalysisSession
     ) -> tuple[str, str | None, list[dict[str, Any]]]:
+        """The question to analyse, a clarification answer if this message is one, and the
+        earlier turns that matter to it.
+
+        Candidates are fetched with the owner, dataset *and* conversation of this session
+        in the WHERE clause: another user's, dataset's or conversation's turns are never
+        candidates, whatever their text says.
+        """
         earlier = list(
             (
                 await db.scalars(
                     select(AnalysisSession)
                     .where(
                         AnalysisSession.conversation_id == run.conversation_id,
+                        AnalysisSession.owner_id == run.owner_id,
+                        AnalysisSession.dataset_id == run.dataset_id,
                         AnalysisSession.id != run.id,
                         AnalysisSession.created_at <= run.created_at,
                     )
                     .order_by(AnalysisSession.created_at.desc())
-                    .limit(PRIOR_TURNS + 1)
+                    .limit(SCAN_TURNS + 1)
                 )
             ).all()
         )
@@ -181,15 +190,21 @@ class AgentRunner:
             question, clarification = asked.question, run.question
             asked.status, asked.termination_reason = "succeeded", "clarification_answered"
             earlier = earlier[1:]
-        prior = [
-            {
-                "question": s.question,
-                "restated": (s.understanding or {}).get("restated_question"),
-                "answer": s.final_summary,
-            }
-            for s in reversed(earlier[:PRIOR_TURNS])
-            if s.status in ("succeeded", "partial") and s.final_summary
+        finished = [
+            s for s in reversed(earlier) if s.status in ("succeeded", "partial") and s.final_summary
         ]
+        turns = [
+            s.memory
+            or build_turn_memory(
+                question=s.question,
+                understanding=s.understanding,
+                result=s.result,
+                final_summary=s.final_summary,
+                dataset_version=s.dataset_version,
+            )
+            for s in finished
+        ]
+        prior = select_relevant(question, turns, dataset_version=run.dataset_version)
         return question, clarification, prior
 
     async def _record_event(
@@ -231,6 +246,13 @@ class AgentRunner:
             run.plan = final["plan"].model_dump() if final.get("plan") else None
             run.final_summary = response.summary
             run.result = build_result(final, deps)
+            run.memory = build_turn_memory(
+                question=run.question,
+                understanding=run.understanding,
+                result=run.result,
+                final_summary=run.final_summary,
+                dataset_version=run.dataset_version,
+            )
             llm_error = final.get("llm_error") or {}
             if run.status == "failed" or llm_error:
                 run.error_code = (

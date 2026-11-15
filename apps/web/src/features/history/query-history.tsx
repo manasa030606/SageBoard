@@ -33,7 +33,7 @@ const EXEC: Record<ExecStatus, { label: string; tone: Tone }> = {
   not_run: { label: "Not run", tone: "neutral" },
 };
 
-export function QueryHistory() {
+export function QueryHistory({ embedded = false }: { embedded?: boolean }) {
   const [origin, setOrigin] = useState<QueryOrigin | "">("");
   const [datasetId, setDatasetId] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -77,13 +77,19 @@ export function QueryHistory() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Audit trail"
-        title="Query history"
-        description="Every SQL statement Sageboard ran against your data, with its outcome. Today that’s table previews; analysis queries will appear here too."
-      />
+      {embedded ? null : (
+        <PageHeader
+          eyebrow="Audit trail"
+          title="Query history"
+          description="Every SQL statement Sageboard ran against your data, with its outcome."
+        />
+      )}
 
-      <div className="mt-8 flex flex-wrap items-center gap-2">
+      <div
+        className={
+          embedded ? "flex flex-wrap items-center gap-2" : "mt-8 flex flex-wrap items-center gap-2"
+        }
+      >
         <Select
           aria-label="Filter by source"
           value={origin}

@@ -15,13 +15,13 @@ import type {
   DatasetSummary,
   Page,
   PreviewResponse,
+  HistoryItem,
   QueryHistoryItem,
   QueryOrigin,
   ReportDetail,
   ReportSummary,
   SessionInfo,
   SessionStatus,
-  SessionSummary,
   UploadReview,
 } from "./types";
 
@@ -135,10 +135,24 @@ export const history = {
         query: { limit: 25, cursor: opts.cursor, origin: opts.origin, dataset_id: opts.datasetId },
       })
     ).data,
-  sessions: async (opts: { cursor?: string | null; status?: SessionStatus | ""; q?: string }) =>
+  /** Past analyses, newest first. `q` searches the question, the answer and the dataset name. */
+  sessions: async (opts: {
+    cursor?: string | null;
+    status?: SessionStatus | "";
+    q?: string;
+    datasetId?: string;
+    since?: string;
+  }) =>
     (
-      await apiRequest<Page<SessionSummary>>("/history/sessions", {
-        query: { limit: 25, cursor: opts.cursor, status: opts.status, q: opts.q },
+      await apiRequest<Page<HistoryItem>>("/history/sessions", {
+        query: {
+          limit: 25,
+          cursor: opts.cursor,
+          status: opts.status,
+          q: opts.q,
+          dataset_id: opts.datasetId,
+          since: opts.since,
+        },
       })
     ).data,
 };
@@ -151,8 +165,12 @@ export const conversations = {
       })
     ).data,
   create: async (datasetId: string) =>
-    (await apiRequest<ConversationDetail>("/conversations", { body: { dataset_id: datasetId } }))
-      .data,
+    (
+      await apiRequest<ConversationDetail>("/conversations", {
+        method: "POST",
+        body: { dataset_id: datasetId },
+      })
+    ).data,
   get: async (id: string) => (await apiRequest<ConversationDetail>(`/conversations/${id}`)).data,
   remove: async (id: string) => {
     await apiRequest(`/conversations/${id}`, { method: "DELETE" });
@@ -161,6 +179,7 @@ export const conversations = {
   ask: async (conversationId: string, question: string) =>
     (
       await apiRequest<SessionAccepted>(`/conversations/${conversationId}/sessions`, {
+        method: "POST",
         body: { question },
       })
     ).data,
@@ -177,15 +196,31 @@ export const reports = {
   create: async (analysisSessionId: string, title?: string) =>
     (
       await apiRequest<ReportDetail>("/reports", {
+        method: "POST",
         body: { analysis_session_id: analysisSessionId, ...(title ? { title } : {}) },
       })
     ).data,
   list: async (cursor?: string | null) =>
     (await apiRequest<Page<ReportSummary>>("/reports", { query: { limit: 25, cursor } })).data,
+  /** Reports already saved from one analysis (to avoid saving the same one twice). */
+  forSession: async (analysisSessionId: string) =>
+    (
+      await apiRequest<Page<ReportSummary>>("/reports", {
+        query: { limit: 5, analysis_session_id: analysisSessionId },
+      })
+    ).data.items,
   get: async (id: string) => (await apiRequest<ReportDetail>(`/reports/${id}`)).data,
   remove: async (id: string) => {
     await apiRequest(`/reports/${id}`, { method: "DELETE" });
   },
+  /** The PDF file itself; the browser saves it, nothing is rendered client-side. */
+  pdf: async (id: string) =>
+    (
+      await apiRequest<Blob>(`/reports/${id}/export.pdf`, {
+        responseType: "blob",
+        timeoutMs: 60_000,
+      })
+    ).data,
   markdown: async (id: string) =>
     (await apiRequest<string>(`/reports/${id}/export.md`, { responseType: "text" })).data,
 };

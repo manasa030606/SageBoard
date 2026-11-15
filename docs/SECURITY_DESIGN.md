@@ -188,10 +188,16 @@ Fallback if per-dataset roles cannot be administered on the chosen plan: one `sa
 - **Frontend:** all data is fetched client-side with `credentials: "include"`. The app area waits for `/auth/me` before rendering. A session change (sign-in, sign-out or expiry) triggers a full page load, so no client-side state from the previous session survives. After sign-in the app only redirects to same-app paths (`/app…`), never another site.
 
 **Planned:**
-- Content Security Policy and other security headers (Phase 13).
+- Content Security Policy and other security headers (Phase 14).
 - Password change and account deletion (deletion must also drop the user's warehouse schemas).
 - Email verification and password reset.
 - Rate limits shared across instances.
+
+### 7.x Reports and conversation memory (Phase 8)
+- Every report, history and memory query is scoped by `owner_id`; foreign ids return 404 on every report route including `export.pdf` (test_phase8_history_reports, test_ownership).
+- Conversation memory is built by code, read only within one owner+dataset+conversation, and passed to the model as quoted data (prompt-injection boundary unchanged). Earlier numbers are never reused as facts.
+- PDF/Markdown rendering treats all text as data: XML-escaped before layout, control characters dropped, unsupported glyphs replaced, filenames ASCII-slugged; no network access and no embedded external resources.
+- Free-text report fields drop NUL characters at the schema boundary.
 
 ## 8. File upload security
 
@@ -204,7 +210,7 @@ Fallback if per-dataset roles cannot be administered on the chosen plan: one `sa
 - The whole load (schema, role, table, COPY, grants, catalog) is one transaction. Any failure leaves no schema, role or rows behind (tested).
 
 **Planned:** XLSX (openpyxl `read_only=True, data_only=True` after a zip size/ratio check, reject > 100:1 or > 500 MB uncompressed, ≤ 10 sheets; macros and external links ignored), MIME/magic-byte sniffing, and moving ingestion to a background worker.
-- **CSV export (Phase 12):** cells starting with `= + - @ \t \r` are prefixed with `'` (formula-injection mitigation).
+- **CSV export (Phase 13):** cells starting with `= + - @ \t \r` are prefixed with `'` (formula-injection mitigation).
 
 ## 9. No code execution policy
 - The codebase has no `eval`, `exec`, `compile`, `subprocess`, `os.system` or `pickle.loads` on dynamic input. A CI check enforces this (ruff `S` rules: S102, S307, S602–S607, S301, plus a custom grep gate on `app/`).

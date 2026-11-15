@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Document | API_SPECIFICATION v0.6 |
-| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13): §3 Datasets as built. v0.4 (2026-11-14): auth, conversations, analysis sessions, history, reports and readiness as built in Phase 4 (§0 lists every endpoint). v0.5 (2026-11-14): sessions run the LangGraph agent; result and trace (Phase 5). v0.6 (2026-11-15): `follow_up_questions` and the full chart-type enum (Phase 7, D52). Decisions: see DECISION_LOG.md |
+| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13): §3 Datasets as built. v0.4 (2026-11-14): auth, conversations, analysis sessions, history, reports and readiness as built in Phase 4 (§0 lists every endpoint). v0.5 (2026-11-14): sessions run the LangGraph agent; result and trace (Phase 5). v0.6 (2026-11-15): `follow_up_questions` and the full chart-type enum (Phase 7, D52). v0.7 (2026-11-15): history items, report snapshot v2, PDF export, numeric fidelity (Phase 8, D54–D55). Decisions: see DECISION_LOG.md |
 | Base URL | `https://<api-host>/api/v1` |
 | Format | JSON (UTF-8); `multipart/form-data` for uploads; `text/event-stream` for run events |
 | Source of truth | FastAPI-generated OpenAPI 3.1 at `/api/v1/openapi.json`. The frontend types are generated from it. |
@@ -23,7 +23,7 @@
 | Conversations | list, create, get, rename, delete | — |
 | Analysis sessions | `POST /conversations/{id}/sessions` (starts the agent), `GET /analysis-sessions/{id}` (incl. `result`), `POST /analysis-sessions/{id}/cancel`, `GET /analysis-sessions/{id}/trace` | SSE stream (§5), rerun, paged results |
 | History | `GET /history/sessions`, `GET /history/queries` | — |
-| Reports | list, create, get, `PATCH`, delete, `GET /reports/{id}/export.md` | — |
+| Reports | list (`?analysis_session_id=`), create, get, `PATCH`, delete, `GET /reports/{id}/export.md`, `GET /reports/{id}/export.pdf` | — |
 | Dashboard, settings, usage | — | §8, §9 |
 
 Naming: the v0.2 "runs" are called **analysis sessions** in the API, at `/analysis-sessions/…`. Plain `/sessions` would be confused with sign-in sessions.
@@ -232,7 +232,7 @@ type RunResult = {
 
 Poll `GET /analysis-sessions/{id}` (every 1–2 s) for the outcome and `…/trace` for node-by-node progress. On completion the assistant's summary is added to the conversation, and every SQL attempt appears in `GET /history/queries` (`origin = "agent"`). Runs left `running` by a server restart become `failed` with `error_code = "INTERRUPTED"`. If the model becomes unavailable, the run stops with `termination_reason = "llm_unavailable"` and `error_code` set to `LLM_QUOTA_EXCEEDED`, `LLM_MODEL_NOT_FREE`, `LLM_RATE_LIMITED`, `LLM_AUTH_FAILED` or `LLM_MODEL_NOT_FOUND`. A run started after the daily cap is reached ends `LLM_DAILY_LIMIT_REACHED` without calling the model. The first question becomes the conversation's title if it still has the default one. Workflow details: AGENT_WORKFLOW.md.
 
-**Still planned:** `GET /analysis-sessions/{id}/events` (SSE, §5, Phase 8), rerun, and paged query results.
+**Still planned:** `GET /analysis-sessions/{id}/events` (SSE, §5, Phase 9), rerun, and paged query results.
 
 ## 5. Run event stream (SSE)
 
@@ -275,28 +275,42 @@ The stream closes after a terminal event. A client connecting after completion g
 
 | Method | Path | Query | Response |
 |---|---|---|---|
-| GET | `/history/sessions` | `status`, `dataset_id`, `q` (case-insensitive substring of the question; `%` and `_` are literal), `limit`, `cursor` | `Page<SessionSummary>` newest first |
+| GET | `/history/sessions` | `status`, `dataset_id`, `since` (ISO time), `q` (case-insensitive substring of the question, the answer or the dataset name; `%` and `_` are literal), `limit`, `cursor` | `Page<HistoryItem>` newest first |
 | GET | `/history/queries` | `dataset_id`, `analysis_session_id`, `origin` (`agent`/`preview`/`widget_refresh`/`rerun`), `exec_status`, `limit`, `cursor` | `Page<QueryHistoryItem>` newest first |
 
 ```ts
+type HistoryItem = SessionSummary & {
+  conversation_title: string; dataset_name: string;
+  summary: string | null;      // the answer, shortened to ~280 characters
+  finding_count: number;       // verified findings in the stored result
+  query_count: number;         // SQL statements that ran successfully for this analysis
+  report_id: string | null;    // newest saved report for it
+};
 type QueryHistoryItem = { id: string; dataset_id: string; dataset_name: string; analysis_session_id: string | null;
   origin: "agent" | "preview" | "widget_refresh" | "rerun"; attempt: number; executed_sql: string | null;
   guard_status: "accepted" | "rejected" | "not_applicable"; guard_violations: { code: string; message: string }[];
   exec_status: "not_run" | "ok" | "error" | "timeout" | "cancelled"; error_code: string | null;
   error_message: string | null; row_count: number | null; truncated: boolean; exec_ms: number | null; created_at: string };
 ```
-Today the query history holds table previews. Agent SQL will be recorded in the same table.
+`/history/sessions` is the list of past analyses; each one carries everything needed to reopen it (`GET /analysis-sessions/{id}` returns the plan, per-step SQL and result rows, charts and insights) and its `conversation_id` to continue it — a new question in that conversation sees earlier relevant turns (AGENT_WORKFLOW §7). Every query is scoped to the signed-in owner (the session, its conversation and its dataset must all be theirs); the stored result is never loaded for the list. `/history/queries` is the SQL audit log (agent SQL, previews, re-runs).
 
 ## 7. Reports (as built)
 
 | Method | Path | Request | Success | Errors |
 |---|---|---|---|---|
-| GET | `/reports` | `?limit=&cursor=` | `200 Page<ReportSummary>` | 422 |
+| GET | `/reports` | `?analysis_session_id=&limit=&cursor=` | `200 Page<ReportSummary>` | 422 |
 | POST | `/reports` | `{analysis_session_id, title?}` | `201 ReportDetail` | 404, 409 `SESSION_NOT_FINISHED` (only `succeeded` / `partial`) |
-| GET | `/reports/{id}` | — | `200 ReportDetail` | 404 |
+| GET | `/reports/{id}` | — | `200 ReportDetail` (includes `fidelity`) | 404 |
 | PATCH | `/reports/{id}` | `{title?, summary?}` | `200 ReportDetail` (a changed summary sets `summary_edited_by_user`) | 404, 422 |
 | DELETE | `/reports/{id}` | — | `204` | 404 |
-| GET | `/reports/{id}/export.md` | — | `200 text/markdown` attachment: title, question, dataset, summary, methodology (SQL) | 404 |
+| GET | `/reports/{id}/export.md` | — | `200 text/markdown` attachment, same sections as the PDF | 404 |
+| GET | `/reports/{id}/export.pdf` | — | `200 application/pdf` attachment (`Cache-Control: no-store`, ASCII filename) | 404 |
+
+**PDF sections:** title · question · dataset information · executive summary · analysis methodology · SQL queries · key findings · visualizations · business recommendations · limitations. Drawn on the server (vector charts for bar/grouped/horizontal/histogram, line/area, pie/donut and KPI; scatter and anything that cannot be drawn faithfully fall back to the data table). Text containing markup, control characters or glyphs the font lacks is shown literally or replaced, never interpreted.
+
+**Snapshot v2** (`content`, `version: 2`): `question`, `status`, `dataset{name, description, version, source_type, tables[{name, rows}]}`, `executive_summary`, `methodology{restated_question, intent, metrics, dimensions, filters, time_range, plan_steps, analysis_tasks, verification}`, `steps[{step_id, purpose, status, sql, row_count, truncated, columns, rows (≤ 10)}]`, `findings[]`, `recommendations[]`, `facts[]`, `charts[{chart_type, title, x, y, value_format, columns, data (≤ 40 rows)}]`, `limitations[]`, `queries[]` (v1 compatibility). Rejected insights are excluded; recommendations are the verified, conditional ones. Reports saved before Phase 8 (v1) still open and export, with the sections they lack marked as such.
+
+**Numeric fidelity** — `ReportDetail.fidelity = {status: "verified" | "flagged" | "not_checkable", checked, issues[{where, numbers[]}]}`. Computed on every read/export by the agent's grounding engine: each number in the summary, findings and recommendations must match a stored result cell, computed fact or chart value (display-rounding tolerant). Editing the summary re-evaluates it; a number that is not in the stored results is `flagged` and printed in a notice in the PDF/Markdown/UI. Free-text fields drop NUL characters (PostgreSQL cannot store them).
 
 ```ts
 type ReportSummary = { id: string; title: string; analysis_session_id: string | null; dataset_id: string | null;

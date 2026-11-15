@@ -16,7 +16,7 @@ export interface RequestOptions {
    */
   acceptStatuses?: readonly number[];
   /** Expect a text body (e.g. a Markdown download) instead of JSON. */
-  responseType?: "json" | "text";
+  responseType?: "json" | "text" | "blob";
   /** Try one silent token refresh on 401 before failing (default true). */
   retryOnAuth?: boolean;
   /** Override for tests; defaults to the configured API base URL. */
@@ -99,8 +99,8 @@ export async function apiRequest<T>(
   options: RequestOptions = {},
 ): Promise<ApiResponse<T>> {
   const {
-    method = "GET",
     body,
+    method = body === undefined ? "GET" : "POST",
     query,
     signal,
     timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -115,7 +115,11 @@ export async function apiRequest<T>(
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const headers: Record<string, string> = {
     Accept:
-      responseType === "text" ? "text/markdown, text/plain, application/json" : "application/json",
+      responseType === "text"
+        ? "text/markdown, text/plain, application/json"
+        : responseType === "blob"
+          ? "application/pdf, application/json"
+          : "application/json",
   };
   const isForm = typeof FormData !== "undefined" && body instanceof FormData;
   if (body !== undefined && !isForm) headers["Content-Type"] = "application/json";
@@ -164,6 +168,10 @@ export async function apiRequest<T>(
   }
   if (response.ok && responseType === "text") {
     return { status: response.status, data: (await response.text()) as T, requestId };
+  }
+
+  if (response.ok && responseType === "blob") {
+    return { status: response.status, data: (await response.blob()) as T, requestId };
   }
 
   const payload: unknown = await readJson(response);

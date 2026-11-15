@@ -165,6 +165,16 @@ export interface SessionSummary {
   created_at: string;
 }
 
+/** One past analysis as the History list shows it. */
+export interface HistoryItem extends SessionSummary {
+  conversation_title: string;
+  dataset_name: string;
+  summary: string | null;
+  finding_count: number;
+  query_count: number;
+  report_id: string | null;
+}
+
 // -------------------------------------------------------------- reports
 export interface ReportSummary {
   id: string;
@@ -175,17 +185,85 @@ export interface ReportSummary {
   updated_at: string;
 }
 
+export interface ReportFidelity {
+  status: "verified" | "flagged" | "not_checkable";
+  checked: number;
+  issues: { where: string; numbers: string[] }[];
+}
+
+export interface ReportChart {
+  chart_type: string;
+  title: string | null;
+  subtitle: string | null;
+  step_id: string;
+  x: string | null;
+  y: string[];
+  series: string | null;
+  value_format: "number" | "currency" | "percent" | "integer";
+  columns: string[];
+  data: unknown[][];
+  rows_total: number;
+}
+
+export interface ReportContent {
+  /** 2 for reports saved from Phase 8 on; older snapshots have only question/dataset/queries. */
+  version?: number;
+  question?: string;
+  status?: string;
+  dataset?: {
+    name: string | null;
+    version: number;
+    description?: string | null;
+    source_type?: string | null;
+    tables?: { name: string; rows: number }[];
+  };
+  final_summary?: string | null;
+  executive_summary?: string;
+  methodology?: {
+    restated_question: string | null;
+    intent: string | null;
+    metrics: string[];
+    dimensions: string[];
+    filters: string[];
+    time_range: string | null;
+    plan_steps: { step_id: string; purpose: string }[];
+    analysis_tasks: string[];
+    verification: {
+      metrics_check: string | null;
+      time_period_check: string | null;
+      verified_insights: number;
+      rejected_insights: number;
+    } | null;
+  };
+  steps?: {
+    step_id: string;
+    purpose: string | null;
+    status: string;
+    sql: string | null;
+    row_count: number | null;
+    truncated: boolean;
+    columns: string[];
+    rows: unknown[][];
+  }[];
+  findings?: {
+    headline: string;
+    detail: string;
+    category: string;
+    confidence: string;
+    verification: string;
+  }[];
+  recommendations?: { headline: string; detail: string; confidence: string }[];
+  charts?: ReportChart[];
+  limitations?: string[];
+  queries?: { sql: string; row_count: number | null; truncated: boolean }[];
+  finished_at?: string | null;
+}
+
 export interface ReportDetail extends ReportSummary {
   summary: string;
   summary_edited_by_user: boolean;
-  content: {
-    question?: string;
-    status?: string;
-    dataset?: { name: string | null; version: number };
-    final_summary?: string | null;
-    queries?: { sql: string; row_count: number | null; truncated: boolean }[];
-    finished_at?: string | null;
-  };
+  content: ReportContent;
+  fidelity: ReportFidelity | null;
 }
 
 // -------------------------------------------- conversations & analysis sessions
@@ -235,7 +313,12 @@ export interface WireAttempt {
   exec_error: string | null;
   exec_ms: number | null;
   row_count: number | null;
-  diagnosis: { category: string; recoverable: boolean; summary: string; hint: string | null } | null;
+  diagnosis: {
+    category: string;
+    recoverable: boolean;
+    summary: string;
+    hint: string | null;
+  } | null;
 }
 
 export interface WireColumn {

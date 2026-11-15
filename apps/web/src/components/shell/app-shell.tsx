@@ -33,7 +33,7 @@ const PRIMARY: NavItem[] = [
   { href: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/app/analyst", label: "Analyst", icon: MessageSquareText },
   { href: "/app/data", label: "Data sources", icon: Database },
-  { href: "/app/history", label: "Query history", icon: History },
+  { href: "/app/history", label: "History", icon: History },
   { href: "/app/reports", label: "Reports", icon: FileText },
 ];
 const SECONDARY: NavItem[] = [{ href: "/app/settings", label: "Settings", icon: Settings }];

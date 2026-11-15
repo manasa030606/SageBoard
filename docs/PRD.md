@@ -205,7 +205,7 @@ IDs are referenced by the tests in TESTING_STRATEGY.md.
 
 | # | Assumption | Why | If wrong |
 |---|---|---|---|
-| A1 | MVP data sources are uploaded files + sample dataset | Avoids SSRF/credential handling in MVP; keeps demo reliable | Add Phase 11b "External Postgres connectors" |
+| A1 | MVP data sources are uploaded files + sample dataset | Avoids SSRF/credential handling in MVP; keeps demo reliable | Add Phase 12b "External Postgres connectors" |
 | A2 | Single-user workspaces | Enough for evaluation; isolation still enforced | Add workspace_members and roles |
 | A3 | English questions only | Prompting and eval set are in English | Add multilingual eval cases |
 | A4 | Datasets ≤ ~1M rows | Free-tier managed Postgres sizes | Add a warehouse (DuckDB/ClickHouse) |

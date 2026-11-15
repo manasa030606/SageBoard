@@ -336,7 +336,6 @@ export function Sparkline({
   );
 }
 
-
 const PIE_COLORS = [...SERIES_COLORS, "var(--color-sage-600)"];
 
 /** Pie / donut for parts of a whole (≤ 6 slices, validated server-side). */
@@ -400,7 +399,9 @@ export function PieChartView({
               />
               <span className="max-w-40 truncate text-ink">{String(row[x])}</span>
               <span className="ml-auto font-mono tabular">
-                {total > 0 ? `${((value / total) * 100).toFixed(0)}%` : formatValue(value, valueFormat)}
+                {total > 0
+                  ? `${((value / total) * 100).toFixed(0)}%`
+                  : formatValue(value, valueFormat)}
               </span>
             </li>
           );

@@ -89,7 +89,7 @@ def test_downgrade_to_base_and_upgrade_to_head(pg: PgUrls) -> None:
     assert up.returncode == 0, up.stderr
     assert app_tables(pg) == EXPECTED_TABLES
     version = run(fetch(pg.owner, "SELECT version_num FROM app.alembic_version"))
-    assert version[0]["version_num"] == "0005"
+    assert version[0]["version_num"] == "0006"
 
 
 def test_models_match_migrations(pg: PgUrls) -> None:

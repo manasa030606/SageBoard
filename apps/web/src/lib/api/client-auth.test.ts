@@ -132,4 +132,30 @@ describe("bodies and responses", () => {
     });
     expect(res.data).toBe("# Title\n");
   });
+
+  it("returns a Blob for a PDF download and still reads error envelopes for it", async () => {
+    const pdf = new Blob(["%PDF-1.7"], { type: "application/pdf" });
+    const ok = vi.fn<typeof fetch>(async () => new Response(pdf, { status: 200 }));
+    const res = await apiRequest<Blob>("/reports/1/export.pdf", {
+      responseType: "blob",
+      baseUrl: BASE,
+      fetchImpl: ok,
+    });
+    expect(res.data).toBeInstanceOf(Blob);
+    expect(await res.data.text()).toBe("%PDF-1.7");
+    expect((ok.mock.calls[0]![1]!.headers as Record<string, string>).Accept).toContain(
+      "application/pdf",
+    );
+
+    const missing = vi.fn<typeof fetch>(async () =>
+      json(404, { error: { code: "NOT_FOUND", message: "That report doesn’t exist." } }),
+    );
+    await expect(
+      apiRequest("/reports/1/export.pdf", {
+        responseType: "blob",
+        baseUrl: BASE,
+        fetchImpl: missing,
+      }),
+    ).rejects.toMatchObject({ status: 404, code: "NOT_FOUND" });
+  });
 });

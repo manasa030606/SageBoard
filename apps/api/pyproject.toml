@@ -19,6 +19,7 @@ dependencies = [
     "langgraph>=1.2.22",
     "sqlglot>=30.31",
     "httpx>=0.28",
+    "reportlab>=5.1.0",
 ]
 
 [dependency-groups]
@@ -30,6 +31,7 @@ dev = [
     "mypy>=1.13",
     "httpx2>=2.16.0",
     "hypothesis>=6.100",
+    "pypdf>=7.1.0",
 ]
 
 [build-system]
@@ -80,7 +82,7 @@ plugins = ["pydantic.mypy"]
 files = ["app", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
-module = ["asyncpg.*"]
+module = ["asyncpg.*", "reportlab.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------- pytest

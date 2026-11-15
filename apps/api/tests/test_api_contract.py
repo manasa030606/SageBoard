@@ -52,6 +52,7 @@ EXPECTED_OPERATIONS = {
     ("PATCH", "/reports/{report_id}"),
     ("DELETE", "/reports/{report_id}"),
     ("GET", "/reports/{report_id}/export.md"),
+    ("GET", "/reports/{report_id}/export.pdf"),
 }
 PUBLIC = {
     ("GET", "/healthz"),

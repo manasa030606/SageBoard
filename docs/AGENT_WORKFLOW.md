@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Document | AGENT_WORKFLOW v0.4 |
+| Document | AGENT_WORKFLOW v0.5 (Phase 8: §7 conversation memory) |
 | Status | v0.2 approved 2026-11-12 (design). **v0.3 (2026-11-14): as built in Phase 5** — LangGraph 1.2, SQLGlot 30. Decisions D42–D49 in DECISION_LOG.md |
 | Code | `apps/api/app/agent/` — `graph.py` (assembly), `state.py`, `routing.py`, `runtime.py` (node wrapper), `nodes/`, `tools/`, `llm/`, `prompts/`, `runner.py` |
 | Depends on | SYSTEM_ARCHITECTURE.md §2.2, SECURITY_DESIGN.md §4, ADR-0002, ADR-0005, ADR-0006, ADR-0007 |
@@ -160,7 +160,16 @@ Every node is wrapped. The wrapper:
 
 ## 7. Conversation context
 
-The runner passes the last 3 finished turns of the conversation (question, restated question, answer) as `prior_context` to understanding and planning, so follow-ups like "and by region?" work. If the previous turn ended with a clarification question (`awaiting_input`), the next message is treated as the answer: the original question is re-run with `clarification_answer`, and the earlier session is closed (`succeeded`, `clarification_answered`). This replaces the v0.2 design's checkpointer interrupt (D46).
+**Memory record (Phase 8, D53).** When a run finishes, `build_turn_memory` (`app/agent/memory.py`, no model call) stores a compact record in `analysis_sessions.memory`: question, restated question, intent, metrics, dimensions, filters, time range, the tables used, the SQL that answered it (≤ 2 successful steps), the verified finding headlines (≤ 3), the answer, topic keywords and the dataset version. Sessions from before Phase 8 get the same record built on the fly from their stored result.
+
+**Retrieval.** For a new question the runner loads candidates with `owner_id`, `dataset_id` and `conversation_id` in the WHERE clause — nothing from another user, dataset or conversation is ever a candidate, whatever its text — scans the most recent 20 finished turns and passes at most 3 as `prior_context`:
+- if the question reads as a follow-up (it opens with "and / also / now / what about / compare / break down…", refers back with a pronoun such as it/that/those, uses a continuation word such as compared/versus/previous/again, or is ≤ 5 words) the previous turn is always included, then up to two more that share topic words;
+- otherwise only turns that cover at least 34% of the question's topic words are included, so an unrelated question gets none; each included turn carries a `relevance` note saying why;
+- the result is trimmed to a 3,500-character budget; a turn recorded against an older dataset version keeps its shape (metrics, dimensions, period) but drops its answer, findings and SQL.
+
+**Reference resolution.** `understand_query.v2` receives the turns as `<data>` and must restate the question standalone ("compare it with last month" → "Compare total revenue for <period> with the month before it"), take the metric/dimension/period from the turn the reference points to, never carry earlier *numbers* into the new analysis (it is re-queried), and ask for clarification when more than one earlier turn could be meant. The trace records `prior_turns` and `prior_relevance` on the `understand_query` event so a user can see what the model was given.
+
+If the previous turn ended with a clarification question (`awaiting_input`), the next message is treated as the answer: the original question is re-run with `clarification_answer`, and the earlier session is closed (`succeeded`, `clarification_answered`). This replaces the v0.2 design's checkpointer interrupt (D46).
 
 ## 8. Prompts and prompt-injection boundary
 
@@ -194,6 +203,8 @@ Prompts are versioned files: `app/agent/prompts/<node>.v<N>.md`. The version is 
 | Routing / structure | `tests/agent/test_routing_and_structure.py` | every router's branches and bounds, global short-circuit, the exact node and edge set, no model calls in tool nodes |
 | Graph (mock tools) | `tests/agent/test_graph_mock.py` | "Why did revenue decrease last month?" end to end (Guard rejection → recovery, chart fallback, ungrounded 23.4 % caught and fixed), out of scope, clarification, all attempts failing, partial answer, removal after two rounds, budget exhaustion, empty-result repair, mid-run cancellation, chart-agent failure, data boundaries |
 | Graph (real DB) | `tests/integration/test_agent_pg.py` | real catalog, Guard and executor on the sample dataset: recovery from a real PostgreSQL error (42883) with computed numbers equal to an independent query; `DROP TABLE` never executed; API run → result, trace, history, ownership (404 for others); clarification resume; queued without a model; interrupted runs failed on restart |
+| Memory (Phase 8) | `tests/agent/test_memory.py` | 24 tests: follow-up detection, record building (no model, figures from facts), relevance selection, budget, stale dataset version, prompt rules |
+| Memory through the real pipeline (Phase 8) | `tests/integration/test_phase8_memory.py` | follow-up sees exactly the previous turn and its figures; first question sees none; a new conversation sees none; another user with the same wording never sees (or leaks) A's regions |
 | Pipeline, multiple datasets (Phase 7) | `tests/integration/test_pipeline_multi_dataset.py` | upload → finalize → conversation → two questions through the API on a CSV dataset with a different schema: per-region totals equal hand-computed truth, pie and horizontal_bar specs validate, insights cite real facts, the follow-up with an ungrounded number is dropped, the thread holds both exchanges |
 
 ## 12. Changes from the v0.2 design

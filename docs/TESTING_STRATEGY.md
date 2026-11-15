@@ -168,6 +168,11 @@ e2e.yml:     compose up (postgres + api ENV=test) → pnpm playwright test → u
 nightly.yml: eval suite with real LLM (secret) → eval_report.json artifact; real-LLM smoke E2E (2 journeys)
 ```
 
+## 10a. Phase 8 additions
+- `tests/agent/test_memory.py` (unit) and `tests/integration/test_phase8_memory.py`: memory retrieval, follow-ups, isolation by user/conversation/dataset, asserted on the prompt text the model actually receives.
+- `tests/integration/test_phase8_history_reports.py`: history persistence (including across an application restart), search over question/answer/dataset, report snapshot v2, PDF text extraction of all ten sections and of stored figures (checked against the uploaded CSV, not against report code), an edited summary with an invented number flagged, markup/NUL/CJK injection safe, reports and history private to their owner.
+- A PDF is rasterised and looked at when its layout changes; text extraction alone does not show a stranded heading or a legend without colours.
+
 ## 11. Test data management
 - The sample dataset generator is seeded and deterministic; its checksum is asserted in tests.
 - Fixtures: `user_factory`, `dataset_factory(csv_text | sample)`, `run_factory`.

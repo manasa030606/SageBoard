@@ -1,8 +1,8 @@
 "use client";
 
 import { Database, MessagesSquare, Plus } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useCallback, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
@@ -21,7 +21,17 @@ export function LiveAnalystWorkspace() {
   const datasetsState = useApi(() => datasetsApi.list(), []);
   const ready = (datasetsState.data ?? []).filter((d) => d.status === "ready");
   const [datasetId, setDatasetId] = useState<string>("");
-  const effectiveDataset = datasetId || ready[0]?.id || "";
+  // History links here with ?conversation=<id>&session=<id> to continue or reopen an analysis.
+  const params = useSearchParams();
+  const conversationParam = params.get("conversation");
+  const focusSessionId = params.get("session");
+  const linked = useApi(
+    () => (conversationParam ? conversationsApi.get(conversationParam) : Promise.resolve(null)),
+    [conversationParam],
+  );
+  const linkedDataset =
+    linked.data && ready.some((d) => d.id === linked.data?.dataset_id) ? linked.data : null;
+  const effectiveDataset = datasetId || linkedDataset?.dataset_id || ready[0]?.id || "";
 
   if (datasetsState.error) {
     return (
@@ -35,6 +45,14 @@ export function LiveAnalystWorkspace() {
     );
   }
   if (datasetsState.loading && !datasetsState.data) {
+    return (
+      <div className="mx-auto grid max-w-[760px] gap-4 px-6 py-16" aria-busy="true">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-28 w-full" />
+      </div>
+    );
+  }
+  if (conversationParam && linked.loading && !linked.data && !linked.error) {
     return (
       <div className="mx-auto grid max-w-[760px] gap-4 px-6 py-16" aria-busy="true">
         <Skeleton className="h-8 w-56" />
@@ -65,6 +83,11 @@ export function LiveAnalystWorkspace() {
       datasetName={ready.find((d) => d.id === effectiveDataset)?.name ?? "Dataset"}
       datasetOptions={ready.map((d) => ({ id: d.id, name: d.name }))}
       onDataset={setDatasetId}
+      initialConversationId={
+        linkedDataset && linkedDataset.dataset_id === effectiveDataset ? linkedDataset.id : null
+      }
+      focusSessionId={focusSessionId}
+      linkError={conversationParam && linked.error ? linked.error.message : null}
     />
   );
 }
@@ -74,14 +97,20 @@ function Thread({
   datasetName,
   datasetOptions,
   onDataset,
+  initialConversationId,
+  focusSessionId,
+  linkError,
 }: {
+  initialConversationId: string | null;
+  focusSessionId: string | null;
+  linkError: string | null;
   datasetId: string;
   datasetName: string;
   datasetOptions: { id: string; name: string }[];
   onDataset: (id: string) => void;
 }) {
   const conversationsState = useApi(() => conversationsApi.list(datasetId), [datasetId]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(initialConversationId);
   const [optimistic, setOptimistic] = useState<SessionSummary[]>([]);
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState<string | null>(null);
@@ -96,6 +125,17 @@ function Thread({
   const serverIds = new Set(serverSessions.map((s) => s.id));
   const sessions = [...serverSessions, ...optimistic.filter((s) => !serverIds.has(s.id))];
   const busy = asking;
+
+  // Reopening a past analysis: bring it into view once its thread has loaded.
+  const scrolledTo = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusSessionId || scrolledTo.current === focusSessionId) return;
+    if (!sessions.some((s) => s.id === focusSessionId)) return;
+    scrolledTo.current = focusSessionId;
+    requestAnimationFrame(() =>
+      document.getElementById(`run-${focusSessionId}`)?.scrollIntoView({ block: "start" }),
+    );
+  });
 
   async function ask(question: string) {
     setAskError(null);
@@ -187,6 +227,11 @@ function Thread({
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto grid max-w-[820px] gap-10 px-4 py-8 sm:px-6">
+            {linkError ? (
+              <Notice tone="warning" title="That conversation couldn’t be opened">
+                {linkError} You can start a new one below.
+              </Notice>
+            ) : null}
             {activeId && conversationState.error ? (
               <ErrorState
                 title="Couldn’t load this conversation"
@@ -202,15 +247,18 @@ function Thread({
               />
             ) : null}
             {sessions.map((session, i) => (
-              <RunCard
-                key={session.id}
-                sessionId={session.id}
-                question={session.question}
-                datasetName={datasetName}
-                onAsk={(q) => void ask(q)}
-                onSettled={i === sessions.length - 1 ? onSettled : undefined}
-                defaultOpen={i === sessions.length - 1}
-              />
+              <div key={session.id} id={`run-${session.id}`} className="scroll-mt-6">
+                <RunCard
+                  sessionId={session.id}
+                  question={session.question}
+                  datasetName={datasetName}
+                  onAsk={(q) => void ask(q)}
+                  onSettled={i === sessions.length - 1 ? onSettled : undefined}
+                  defaultOpen={
+                    focusSessionId ? session.id === focusSessionId : i === sessions.length - 1
+                  }
+                />
+              </div>
             ))}
             <div ref={threadEnd} />
           </div>

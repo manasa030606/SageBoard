@@ -62,10 +62,14 @@ async def understand_query(state: AgentState, ctx: NodeContext) -> dict[str, Any
         update["termination_reason"] = "clarification_needed"
     elif understanding.status == "out_of_scope":
         update["termination_reason"] = "out_of_scope"
+    prior = state.get("prior_context") or []
     ctx.summary = {
         "status": understanding.status,
         "intent": understanding.intent,
         "metrics": understanding.metrics,
         "time_range": understanding.time_range,
+        # Which earlier turns the agent was given, and why (empty for a standalone question).
+        "prior_turns": len(prior),
+        "prior_relevance": [str(p.get("relevance", ""))[:120] for p in prior],
     }
     return update

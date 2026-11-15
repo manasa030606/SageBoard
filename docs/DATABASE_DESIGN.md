@@ -2,8 +2,8 @@
 
 | Field | Value |
 |---|---|
-| Document | DATABASE_DESIGN v0.5 |
-| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13) records the Phase 3 implementation (D26–D33); v0.4 (2026-11-14) adds the Phase 4 auth tables (migration 0004); v0.5 (2026-11-14) adds the agent trace (migration 0005) |
+| Document | DATABASE_DESIGN v0.6 |
+| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13) records the Phase 3 implementation (D26–D33); v0.4 (2026-11-14) adds the Phase 4 auth tables (migration 0004); v0.5 (2026-11-14) adds the agent trace (migration 0005); v0.6 (2026-11-15) adds conversation memory (migration 0006, `analysis_sessions.memory`) and the report snapshot v2 (Phase 8) |
 | Engine | PostgreSQL 16 — Neon in production, native PostgreSQL locally (Homebrew / Postgres.app; Docker optional). SQLAlchemy 2.x async + asyncpg, Alembic |
 | Permission model | [ADR-0002](adr/0002-database-topology-and-permissions.md) — roles in `infra/postgres/init/001_roles.sh`; per-dataset schemas and reader roles in `app/ingestion/warehouse.py` |
 | Source of truth | §4 is generated from the models: `uv run python scripts/schema_reference.py` (apps/api) |
@@ -309,12 +309,14 @@ Deletion behaviour (all verified in `tests/integration/test_models.py`):
 | started_at | timestamp with time zone |  |
 | finished_at | timestamp with time zone |  |
 | result | jsonb |  |
+| memory | jsonb |  |
 | llm_provider | varchar(32) |  |
 | llm_model | varchar(120) |  |
 | created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
 
 - CHECK `ck_analysis_sessions_question_length`: `char_length(question) BETWEEN 1 AND 2000`
 - CHECK `ck_analysis_sessions_status`: `status IN ('queued', 'running', 'awaiting_input', 'succeeded', 'partial', 'failed', 'cancelled')`
+- `memory` (migration 0006): the compact per-turn record conversation memory reads (question, restated question, intent, metrics, dimensions, time range, headline figures, answer, dataset version). Built by code in `app/agent/memory.py`; NULL for sessions that finished before Phase 8 (the runner rebuilds it on the fly)
 - INDEX `ix_analysis_sessions_active` (status) WHERE `status IN ('queued', 'running', 'awaiting_input')`
 - INDEX `ix_analysis_sessions_conversation_id` (conversation_id)
 - INDEX `ix_analysis_sessions_dataset_id` (dataset_id)
@@ -386,6 +388,7 @@ Deletion behaviour (all verified in `tests/integration/test_models.py`):
 | created_at | timestamp with time zone | NOT NULL, DEFAULT now() |
 | updated_at | timestamp with time zone | NOT NULL, DEFAULT now() |
 
+- `content` holds the report snapshot: v1 = question, dataset, SQL list; **v2 (Phase 8)** adds dataset tables, methodology, per-step SQL and rows, findings, recommendations, chart data and limitations (API_SPECIFICATION §7)
 - INDEX `ix_reports_analysis_session_id` (analysis_session_id)
 - INDEX `ix_reports_dataset_id` (dataset_id)
 - INDEX `ix_reports_owner_id_created_at` (owner_id, created_at DESC)
@@ -450,6 +453,7 @@ The window is Nov 2024 – Oct 2026, across six US regions and six categories. B
 | 0003 | `datasets.connection_id` FK → `NO ACTION DEFERRABLE INITIALLY DEFERRED` (found by the cascade test) |
 | 0004 | `refresh_tokens` (hashed, rotating, family id), `audit_log` (INET ip, jsonb meta), `users.last_login_at` (Phase 4) |
 | 0005 | `agent_node_runs` (node, status, duration, summary, tool and LLM calls; unique per session + seq) and `analysis_sessions.result` / `llm_provider` / `llm_model` (Phase 5) |
+| 0006 | `analysis_sessions.memory` (JSONB, nullable): the per-turn conversation-memory record (Phase 8, D53) |
 
 Alembic manages `app` only. `ds_%` schemas are excluded by `include_object`, and the version table is `app.alembic_version`. Tests run `downgrade base → upgrade head` and `alembic check` (models == migrations) against a dedicated `sageboard_test` database.
 

@@ -36,6 +36,12 @@ describe("apiRequest", () => {
     expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
   });
 
+  it("sends POST when a body is given without a method (a GET with a body never leaves the browser)", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(201, { id: "x" }));
+    await apiRequest("/things", { body: { a: 1 }, baseUrl: BASE, fetchImpl });
+    expect(fetchImpl.mock.calls[0]![1]!.method).toBe("POST");
+  });
+
   it("maps the backend error envelope to ApiError", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       jsonResponse(404, {

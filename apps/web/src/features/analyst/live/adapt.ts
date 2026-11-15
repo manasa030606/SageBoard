@@ -59,9 +59,7 @@ export function toResultTable(
       label: columnLabel(c.name),
       format: columnFormat(c.type),
     })),
-    rows: rows.map((row) =>
-      Object.fromEntries(columns.map((c, i) => [c.name, cell(row[i])])),
-    ),
+    rows: rows.map((row) => Object.fromEntries(columns.map((c, i) => [c.name, cell(row[i])]))),
     rowCount: rowCount ?? rows.length,
     truncated: truncated ?? false,
   };
@@ -263,7 +261,12 @@ export function adaptTimeline(trace: NodeRun[]): TimelineStep[] {
       node: known.node,
       label: known.label,
       detail: summaryDetail(run),
-      status: run.status === "succeeded" ? "succeeded" : run.status === "degraded" ? "recovered" : "failed",
+      status:
+        run.status === "succeeded"
+          ? "succeeded"
+          : run.status === "degraded"
+            ? "recovered"
+            : "failed",
       durationMs: run.duration_ms,
       tools: run.tool_calls
         .map((t) => t.tool)

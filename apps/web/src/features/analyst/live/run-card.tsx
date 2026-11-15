@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  BookmarkPlus,
-  ChevronRight,
-  CircleSlash,
-  Database,
-  FileText,
-  Loader2,
-  Table2,
-} from "lucide-react";
+import { BookmarkPlus, ChevronRight, CircleSlash, Database, Loader2, Table2 } from "lucide-react";
 import { useState } from "react";
 
 import { ChartRenderer } from "@/components/charts/chart-renderer";
@@ -16,10 +8,8 @@ import { ResultTableView } from "@/components/data/result-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Notice, Skeleton } from "@/components/ui/states";
-import { useToast } from "@/components/ui/toast";
-import { analysis, reports } from "@/lib/api/endpoints";
+import { analysis } from "@/lib/api/endpoints";
 import type { SessionDetail } from "@/lib/api/types";
-import { toApiError } from "@/lib/use-api";
 import { cn } from "@/lib/cn";
 import { formatDuration } from "@/lib/format";
 
@@ -27,6 +17,7 @@ import { InsightList } from "../insights";
 import { SqlCode, SqlViewer } from "../sql-viewer";
 import { ExecutionTimeline } from "../timeline";
 import { adaptRun, adaptTimeline, liveActivity, type LiveRun, type LiveStep } from "./adapt";
+import { ReportActions } from "./report-actions";
 import { useLiveSession } from "./use-live-session";
 
 export function RunCard({
@@ -59,7 +50,9 @@ export function RunCard({
             <Database className="size-3.5" aria-hidden /> {datasetName}
           </span>
           <StatusBadge run={run} loading={detail === undefined} />
-          {run?.durationMs ? <span className="tabular">{formatDuration(run.durationMs)}</span> : null}
+          {run?.durationMs ? (
+            <span className="tabular">{formatDuration(run.durationMs)}</span>
+          ) : null}
         </div>
         <h2 id={`${sessionId}-q`} className="text-title text-[22px] text-ink sm:text-[24px]">
           {detail?.question ?? question}
@@ -90,7 +83,10 @@ export function RunCard({
             className="group flex items-center justify-between gap-3 rounded-sm border border-line bg-paper px-3.5 py-2.5 text-left text-sm text-ink-2 transition-colors hover:border-forest/50 hover:bg-sage-50"
           >
             <span className="line-clamp-2">{run.summary ?? "Show this analysis"}</span>
-            <ChevronRight className="size-4 shrink-0 text-ink-3 group-hover:text-forest" aria-hidden />
+            <ChevronRight
+              className="size-4 shrink-0 text-ink-3 group-hover:text-forest"
+              aria-hidden
+            />
           </button>
         )
       ) : null}
@@ -102,19 +98,37 @@ function StatusBadge({ run, loading }: { run: LiveRun | null; loading: boolean }
   if (loading) return <Badge tone="neutral">Loading</Badge>;
   switch (run?.status) {
     case "queued":
-      return <Badge tone="neutral" dot>Queued</Badge>;
+      return (
+        <Badge tone="neutral" dot>
+          Queued
+        </Badge>
+      );
     case "running":
-      return <Badge tone="info" dot>Running</Badge>;
+      return (
+        <Badge tone="info" dot>
+          Running
+        </Badge>
+      );
     case "awaiting_input":
-      return <Badge tone="warning" dot>Needs an answer</Badge>;
+      return (
+        <Badge tone="warning" dot>
+          Needs an answer
+        </Badge>
+      );
     case "succeeded":
       return run.responseStatus === "out_of_scope" ? (
         <Badge tone="neutral">Can’t answer</Badge>
       ) : (
-        <Badge tone="positive" dot>Answered</Badge>
+        <Badge tone="positive" dot>
+          Answered
+        </Badge>
       );
     case "partial":
-      return <Badge tone="warning" dot>Partial answer</Badge>;
+      return (
+        <Badge tone="warning" dot>
+          Partial answer
+        </Badge>
+      );
     case "cancelled":
       return <Badge tone="neutral">Cancelled</Badge>;
     default:
@@ -159,14 +173,20 @@ function LiveProgress({
         <details className="group rounded-sm border border-line bg-paper">
           <summary className="flex cursor-pointer list-none items-center justify-between px-3.5 py-2.5 text-[13px] font-medium text-ink">
             Execution trace
-            <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden />
+            <ChevronRight
+              className="size-3.5 transition-transform group-open:rotate-90"
+              aria-hidden
+            />
           </summary>
           <div className="border-t border-line px-3.5 py-3.5">
             <ExecutionTimeline steps={steps} revealed={steps.length} live={false} compact />
           </div>
         </details>
       ) : (
-        <div aria-hidden className="grid gap-2 rounded-md border border-dashed border-line-strong px-5 py-5">
+        <div
+          aria-hidden
+          className="grid gap-2 rounded-md border border-dashed border-line-strong px-5 py-5"
+        >
           <Skeleton className="h-3 w-40" />
           <Skeleton className="h-3 w-full max-w-md" />
         </div>
@@ -196,21 +216,7 @@ function RunBody({
     null,
   );
   const [openStep, setOpenStep] = useState<string | null>(null);
-  const { notify } = useToast();
   const answered = run.status === "succeeded" || run.status === "partial";
-
-  async function saveReport() {
-    try {
-      const report = await reports.create(sessionId);
-      notify({
-        tone: "success",
-        title: "Saved as report",
-        description: `“${report.title}” is now under Reports.`,
-      });
-    } catch (err) {
-      notify({ tone: "error", title: "Couldn’t save the report", description: toApiError(err).message });
-    }
-  }
 
   return (
     <>
@@ -275,7 +281,9 @@ function RunBody({
           >
             <div className="px-5 pt-4">
               <p className="text-sm font-semibold text-ink">{chart.spec.title}</p>
-              {chart.spec.subtitle ? <p className="text-xs text-ink-2">{chart.spec.subtitle}</p> : null}
+              {chart.spec.subtitle ? (
+                <p className="text-xs text-ink-2">{chart.spec.subtitle}</p>
+              ) : null}
               {chart.fallbackReason ? (
                 <p className="mt-1 text-xs text-ink-3">Shown as a table: {chart.fallbackReason}</p>
               ) : null}
@@ -297,7 +305,9 @@ function RunBody({
         <section aria-label="What the data shows">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <h3 className="text-[15px] font-semibold text-ink">What the data shows</h3>
-            <span className="text-xs text-ink-2">Every insight cites the rows or facts it uses</span>
+            <span className="text-xs text-ink-2">
+              Every insight cites the rows or facts it uses
+            </span>
           </div>
           <InsightList
             insights={run.insights}
@@ -307,7 +317,9 @@ function RunBody({
               if (!target) return;
               setHighlight({ stepId: target, rows, id });
               setOpenStep(target);
-              document.getElementById(`${sessionId}-${target}`)?.scrollIntoView({ block: "nearest" });
+              document
+                .getElementById(`${sessionId}-${target}`)
+                ?.scrollIntoView({ block: "nearest" });
             }}
           />
         </section>
@@ -346,14 +358,7 @@ function RunBody({
 
       {answered ? (
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
-          <Button
-            size="sm"
-            variant="secondary"
-            leadingIcon={<FileText className="size-3.5" aria-hidden />}
-            onClick={() => void saveReport()}
-          >
-            Save as report
-          </Button>
+          <ReportActions sessionId={sessionId} />
           {run.usage ? (
             <span className="text-xs text-ink-2 tabular">
               {run.usage.llmCalls} model calls · {run.usage.sqlExecutions}{" "}
@@ -391,7 +396,10 @@ function RunBody({
   );
 }
 
-const STEP_BADGE: Record<LiveStep["status"], { tone: "positive" | "warning" | "neutral" | "critical"; label: string }> = {
+const STEP_BADGE: Record<
+  LiveStep["status"],
+  { tone: "positive" | "warning" | "neutral" | "critical"; label: string }
+> = {
   succeeded: { tone: "positive", label: "Succeeded" },
   failed: { tone: "critical", label: "Failed" },
   skipped: { tone: "neutral", label: "Skipped" },
@@ -432,7 +440,10 @@ function StepDetails({
             {step.table.truncated ? "+" : ""} rows
           </span>
         ) : null}
-        <ChevronRight className="size-4 text-ink-3 transition-transform group-open:rotate-90" aria-hidden />
+        <ChevronRight
+          className="size-4 text-ink-3 transition-transform group-open:rotate-90"
+          aria-hidden
+        />
       </summary>
       <div className="border-t border-line">
         {step.failure ? (
@@ -463,7 +474,11 @@ function StepDetails({
               ))}
             </div>
             {tab === "table" ? (
-              <ResultTableView table={step.table} highlightRows={highlightRows} fileName={step.id} />
+              <ResultTableView
+                table={step.table}
+                highlightRows={highlightRows}
+                fileName={step.id}
+              />
             ) : step.attempts.length > 1 ? (
               <SqlViewer attempts={step.attempts} />
             ) : step.sql ? (

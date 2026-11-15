@@ -111,6 +111,8 @@ class AnalysisSession(CreatedAtMixin, Base):
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     llm_provider: Mapped[str | None] = mapped_column(String(32))
     llm_model: Mapped[str | None] = mapped_column(String(120))
+    # Phase 8: compact structured memory of this turn (app/agent/memory.py), built by code.
+    memory: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     conversation: Mapped[Conversation] = relationship(back_populates="sessions")
     query_executions: Mapped[list[QueryExecution]] = relationship(
