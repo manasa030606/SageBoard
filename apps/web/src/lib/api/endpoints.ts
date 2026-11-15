@@ -5,6 +5,11 @@
 import { apiRequest, setCsrfToken } from "./client";
 import type {
   ColumnType,
+  ConversationDetail,
+  ConversationSummary,
+  NodeRun,
+  SessionAccepted,
+  SessionDetail,
   DatasetColumn,
   DatasetDetail,
   DatasetSummary,
@@ -138,7 +143,43 @@ export const history = {
     ).data,
 };
 
+export const conversations = {
+  list: async (datasetId?: string) =>
+    (
+      await apiRequest<Page<ConversationSummary>>("/conversations", {
+        query: { dataset_id: datasetId, limit: 50 },
+      })
+    ).data,
+  create: async (datasetId: string) =>
+    (await apiRequest<ConversationDetail>("/conversations", { body: { dataset_id: datasetId } }))
+      .data,
+  get: async (id: string) => (await apiRequest<ConversationDetail>(`/conversations/${id}`)).data,
+  remove: async (id: string) => {
+    await apiRequest(`/conversations/${id}`, { method: "DELETE" });
+  },
+  /** Ask a question: stores it and starts the analysis agent (202). */
+  ask: async (conversationId: string, question: string) =>
+    (
+      await apiRequest<SessionAccepted>(`/conversations/${conversationId}/sessions`, {
+        body: { question },
+      })
+    ).data,
+};
+
+export const analysis = {
+  get: async (id: string) => (await apiRequest<SessionDetail>(`/analysis-sessions/${id}`)).data,
+  cancel: async (id: string) =>
+    (await apiRequest<SessionDetail>(`/analysis-sessions/${id}/cancel`, { method: "POST" })).data,
+  trace: async (id: string) => (await apiRequest<NodeRun[]>(`/analysis-sessions/${id}/trace`)).data,
+};
+
 export const reports = {
+  create: async (analysisSessionId: string, title?: string) =>
+    (
+      await apiRequest<ReportDetail>("/reports", {
+        body: { analysis_session_id: analysisSessionId, ...(title ? { title } : {}) },
+      })
+    ).data,
   list: async (cursor?: string | null) =>
     (await apiRequest<Page<ReportSummary>>("/reports", { query: { limit: 25, cursor } })).data,
   get: async (id: string) => (await apiRequest<ReportDetail>(`/reports/${id}`)).data,

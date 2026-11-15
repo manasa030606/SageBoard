@@ -146,3 +146,24 @@ feat(agent): Phase 5 — LangGraph agentic analysis core
 **Tests:** 493 backend tests pass (17 new). The new tests cover Google error bodies, pacing, aliases, a mid-run quota stop, the daily cap on PostgreSQL and the schema fallback.
 
 **Still unverified:** no live Gemini request has been made from the build sandbox (no key), so the request and error shapes are tested against Google's documented formats only.
+
+## 9. First real-model runs (2026-11-15, Google Gemini free tier, owner's Mac)
+
+| Run | Model | Outcome | What it showed |
+|---|---|---|---|
+| 1 | gemini-3.8-flash / 3.7-flash | no answer | 503 "high demand" and read timeouts; `check_llm.py` reported them correctly |
+| 2 | gemini-3.5-flash | `failed: budget_exhausted` | ~20 s per call; the deadline stopped the run after 6 calls (deadline raised to 600 s) |
+| 3 | gemini-3.5-flash | `partial` | all 4 queries correct on the first attempt; insight step cut off at 4,096 output tokens → truncation retry, `LLM_REASONING_EFFORT`, clearer message |
+| 4 | gemini-3.5-flash | `failed: llm_unavailable` | daily free quota used up → run stopped immediately with `LLM_QUOTA_EXCEEDED` (quota handling confirmed) |
+| 5 | gemini-3.5-flash-lite | `partial` | **bug found:** previews labelled columns `name (type)` and the model copied the labels, so calculations/charts/evidence failed and were rejected. The judge also caught a false claim of a decrease |
+| 6 | gemini-3.5-flash-lite | **`succeeded`** | 29 nodes, 13 model calls, 4 queries (all accepted and run first time), 3 facts-based insights verified (round 1), summary from the model passed grounding; 127 s |
+
+**Run 6 answer:** "Total revenue actually increased rather than decreased between September 2026 and October 2026, growing by 5.89% from $212,455.25 to $224,974.63…"
+
+What this run demonstrated:
+- **False premise:** the agent corrected the question's premise instead of inventing a cause (prompt v2).
+- **Schema fallback:** Google rejected the JSON schema (400), and the fallback to JSON mode worked on every run.
+
+**Open observations:**
+- One judge uncertainty note said "revenue data only covers September and October 2026". It means the queries covered only those two months; the dataset itself spans Nov 2024 – Oct 2026. Judge notes are model-written and not grounding-checked, so the prompt should ask for notes about the analysis scope, not the data.
+- Free-tier daily quotas are small per model, so the Phase 6 evaluation needs a run plan within those limits.

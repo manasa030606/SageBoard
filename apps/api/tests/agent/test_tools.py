@@ -316,6 +316,31 @@ def _step(columns: list[tuple[str, str]], rows: list[list[object]]) -> StepResul
             _step([("rev", "numeric")], [[5]]),
             False,
         ),
+        (
+            {"chart_type": "donut", "x": "cat", "y": ["rev"]},
+            _step([("cat", "text"), ("rev", "numeric")], [["a", 1], ["b", 2]]),
+            True,
+        ),
+        (
+            {"chart_type": "horizontal_bar", "x": "cat", "y": ["rev"]},
+            _step([("cat", "text"), ("rev", "numeric")], [["a", 1]] * 30),
+            True,
+        ),
+        (
+            {"chart_type": "histogram", "y": ["rev"]},
+            _step([("rev", "numeric")], [[float(i)] for i in range(25)]),
+            True,
+        ),
+        (
+            {"chart_type": "histogram", "y": ["rev"]},
+            _step([("rev", "numeric")], [[1.0]] * 5),
+            False,  # too few rows for a distribution
+        ),
+        (
+            {"chart_type": "histogram", "x": "cat", "y": ["rev"]},
+            _step([("cat", "text"), ("rev", "numeric")], [["a", 1.0]] * 25),
+            False,  # histograms take one numeric column, no x
+        ),
     ],
 )
 def test_chart_validation(spec: dict[str, object], step: StepResult, ok: bool) -> None:

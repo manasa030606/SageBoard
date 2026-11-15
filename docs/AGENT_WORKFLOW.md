@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Document | AGENT_WORKFLOW v0.3 |
+| Document | AGENT_WORKFLOW v0.4 |
 | Status | v0.2 approved 2026-11-12 (design). **v0.3 (2026-11-14): as built in Phase 5** — LangGraph 1.2, SQLGlot 30. Decisions D42–D49 in DECISION_LOG.md |
 | Code | `apps/api/app/agent/` — `graph.py` (assembly), `state.py`, `routing.py`, `runtime.py` (node wrapper), `nodes/`, `tools/`, `llm/`, `prompts/`, `runner.py` |
 | Depends on | SYSTEM_ARCHITECTURE.md §2.2, SECURITY_DESIGN.md §4, ADR-0002, ADR-0005, ADR-0006, ADR-0007 |
@@ -65,9 +65,11 @@ flowchart TD
 | 7 | Error Recovery Agent | `recover_error` (+ `check_result` detection) | yes → `RepairedSQL` | error classifier |
 | 8 | Result Analysis Agent | `analyze_results` | yes, selects calls → `AnalysisSelection` | analysis engine (10 calculations) |
 | 9 | Visualization Agent | `generate_visualization` | yes → `ChartSelection` | `validate_chart_spec` |
+| | *Chart types (Phase 7):* `line`/`area` (time), `bar`/`grouped_bar` (categories, ≤ ~12), `horizontal_bar` (many or long labels), `pie`/`donut` (parts of a whole, ≤ 6 non-negative slices, one measure), `scatter` (two numeric columns), `histogram` (one numeric column, ≥ 10 rows, no x), `kpi` (single row), `table` (fallback). Every spec is validated against the step's **real** columns and rows; an invalid spec degrades to a table with `fallback_reason` recorded — never a wrong picture. | | | |
 | 10 | Insight Generation Agent | `generate_insights` | yes → `InsightDraft` | — |
 | 11 | Verification Agent | `verify_insights` | deterministic + judge → `JudgeVerdict` | `grounding.check`, time-period check |
 | 12 | Final Response Generator | `compose_response` | yes → `SummaryDraft` (checked) | grounding |
+| | *Follow-up suggestions (Phase 7):* `SummaryDraft` carries ≤ 3 `follow_up_questions` (same dataset, self-contained, ≤ 140 chars). Each is checked by the grounding engine: a suggestion containing a number that appears in no fact and no result row is **dropped**, not rewritten. On the no-model path (`llm_unavailable`) the list is empty. | | | |
 
 Control nodes (no model): `load_context` (catalog, budget clock), `check_result` (result sanity), `finish_step` (close a step, skip blocked dependents, advance).
 
@@ -192,6 +194,7 @@ Prompts are versioned files: `app/agent/prompts/<node>.v<N>.md`. The version is 
 | Routing / structure | `tests/agent/test_routing_and_structure.py` | every router's branches and bounds, global short-circuit, the exact node and edge set, no model calls in tool nodes |
 | Graph (mock tools) | `tests/agent/test_graph_mock.py` | "Why did revenue decrease last month?" end to end (Guard rejection → recovery, chart fallback, ungrounded 23.4 % caught and fixed), out of scope, clarification, all attempts failing, partial answer, removal after two rounds, budget exhaustion, empty-result repair, mid-run cancellation, chart-agent failure, data boundaries |
 | Graph (real DB) | `tests/integration/test_agent_pg.py` | real catalog, Guard and executor on the sample dataset: recovery from a real PostgreSQL error (42883) with computed numbers equal to an independent query; `DROP TABLE` never executed; API run → result, trace, history, ownership (404 for others); clarification resume; queued without a model; interrupted runs failed on restart |
+| Pipeline, multiple datasets (Phase 7) | `tests/integration/test_pipeline_multi_dataset.py` | upload → finalize → conversation → two questions through the API on a CSV dataset with a different schema: per-region totals equal hand-computed truth, pie and horizontal_bar specs validate, insights cite real facts, the follow-up with an ungrounded number is dropped, the thread holds both exchanges |
 
 ## 12. Changes from the v0.2 design
 
@@ -201,5 +204,5 @@ Prompts are versioned files: `app/agent/prompts/<node>.v<N>.md`. The version is 
 | `request_clarification` + checkpointer `interrupt()` | clarification is a turn: the run ends `awaiting_input`, the next message resumes with `clarification_answer` | no Postgres checkpointer dependency; survives restarts; same UX (D46) |
 | plan of 1–5 steps | 1–6 SQL steps + `analysis_tasks` | multi-query "why" questions need period, category and region steps |
 | native vendor tool calling in `retrieve_schema` | provider-agnostic tool loop through structured outputs | identical across providers; each step validated (D45) |
-| `explain_cost` gate | not built; statement timeout + row cap + one "aggregate" repair | EXPLAIN cost is unreliable on small datasets; listed as a limitation |
+| `explain_cost` gate | built in Phase 6: `EXPLAIN (FORMAT JSON)` before execution, `EXECUTOR_MAX_PLAN_COST` ceiling, recoverable `too_expensive` | small datasets rarely trip it, but it bounds runaway joins before they run |
 | mock provider usable in development | mock = no model (D42) | the project rules forbid fabricated AI output; scripted replies live only in tests |

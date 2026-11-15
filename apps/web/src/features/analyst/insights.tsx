@@ -35,7 +35,7 @@ export function InsightList({
   activeEvidence,
 }: {
   insights: Insight[];
-  onEvidence?: (rows: number[], evidenceId: string) => void;
+  onEvidence?: (rows: number[], evidenceId: string, stepId?: string) => void;
   activeEvidence?: string | null;
 }) {
   return (
@@ -76,7 +76,7 @@ export function InsightList({
                       active={activeEvidence === `${insight.id}-${i}`}
                       onSelect={
                         onEvidence && ev.rowIndices?.length
-                          ? () => onEvidence(ev.rowIndices ?? [], `${insight.id}-${i}`)
+                          ? () => onEvidence(ev.rowIndices ?? [], `${insight.id}-${i}`, ev.stepId)
                           : undefined
                       }
                       id={`${insight.id}-${i}`}

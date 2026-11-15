@@ -27,6 +27,7 @@ MAX_TEMPLATE_HEADLINES = 3
 
 class SummaryDraft(BaseModel):
     summary: str = Field(min_length=1, max_length=1200)
+    follow_up_questions: list[str] = Field(default_factory=list, max_length=3)
 
 
 def _failures(state: AgentState) -> list[str]:
@@ -121,16 +122,18 @@ async def compose_response(state: AgentState, ctx: NodeContext) -> dict[str, Any
                 assumptions=assumptions,
             )
         else:
+            follow_ups: list[str] = []
             if reason == "llm_unavailable":  # don't call a model that just failed
                 summary, source = template_summary(verified), "template"
             else:
-                summary, source = await _summarise(state, ctx, verified, caveats)
+                summary, source, follow_ups = await _summarise(state, ctx, verified, caveats)
             response = FinalResponse(
                 status="partial" if partial else "answered",
                 summary=summary,
                 key_findings=verified,
                 caveats=caveats,
                 assumptions=assumptions,
+                follow_up_questions=follow_ups,
                 summary_source=source,
             )
     ctx.summary = {
@@ -143,7 +146,7 @@ async def compose_response(state: AgentState, ctx: NodeContext) -> dict[str, Any
 
 async def _summarise(
     state: AgentState, ctx: NodeContext, verified: list[Insight], caveats: list[str]
-) -> tuple[str, str]:
+) -> tuple[str, str, list[str]]:
     fallback = template_summary(verified)
     try:
         draft = await ctx.llm(
@@ -161,12 +164,18 @@ async def _summarise(
         )
     except (LLMError, BudgetExhaustedError) as exc:
         ctx.degraded_reason = f"summary written from template ({type(exc).__name__})"
-        return fallback, "template"
+        return fallback, "template", []
     grounder = Grounder(state.get("facts", []), state["step_results"], context_text(state))
     allowed = [v for i in verified for v in grounder.allowed_values(i.evidence)]
-    # numbers already present in verified insight text are allowed too (same values)
+    # Follow-up suggestions are questions, not claims — but any number they quote must
+    # still be grounded; offending suggestions are dropped, not rewritten.
+    follow_ups = [
+        q.strip()[:140]
+        for q in draft.follow_up_questions
+        if q.strip() and not grounder.ungrounded_numbers(q, allowed)
+    ][:3]
     bad = grounder.ungrounded_numbers(draft.summary, allowed)
     if bad:
         ctx.degraded_reason = f"model summary had ungrounded numbers {bad}; template used"
-        return fallback, "template"
-    return draft.summary, "model"
+        return fallback, "template", follow_ups
+    return draft.summary, "model", follow_ups

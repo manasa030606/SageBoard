@@ -108,6 +108,11 @@ export type RunStatus =
   "queued" | "running" | "awaiting_input" | "succeeded" | "partial" | "failed" | "cancelled";
 
 export type AgentNode =
+  | "load_context"
+  | "check_result"
+  | "finish_step"
+  | "recover_error"
+  | "compose_response"
   | "understand_query"
   | "retrieve_schema"
   | "plan_analysis"
@@ -157,7 +162,17 @@ export interface ResultTable {
 }
 
 export type ChartType =
-  "bar" | "grouped_bar" | "line" | "area" | "horizontal_bar" | "kpi" | "table";
+  | "bar"
+  | "grouped_bar"
+  | "line"
+  | "area"
+  | "horizontal_bar"
+  | "pie"
+  | "donut"
+  | "scatter"
+  | "histogram"
+  | "kpi"
+  | "table";
 
 export interface ChartSpec {
   chartType: ChartType;
@@ -174,6 +189,8 @@ export interface EvidenceRef {
   /** Row indices into the result table (for kind = rows). */
   rowIndices?: number[];
   value?: string;
+  /** Live runs: which plan step's table the rows live in. */
+  stepId?: string;
 }
 
 export interface Insight {

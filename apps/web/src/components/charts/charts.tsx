@@ -8,7 +8,11 @@ import {
   Legend,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
@@ -329,5 +333,148 @@ export function Sparkline({
         strokeLinecap="round"
       />
     </svg>
+  );
+}
+
+
+const PIE_COLORS = [...SERIES_COLORS, "var(--color-sage-600)"];
+
+/** Pie / donut for parts of a whole (≤ 6 slices, validated server-side). */
+export function PieChartView({
+  data,
+  x,
+  y,
+  valueFormat,
+  donut = false,
+  height = 280,
+  ariaLabel,
+}: {
+  data: Row[];
+  /** Category (slice label) column. */
+  x: string;
+  /** Value column. */
+  y: string;
+  valueFormat: ValueFormat;
+  donut?: boolean;
+  height?: number;
+  ariaLabel: string;
+}) {
+  const total = data.reduce((acc, row) => acc + Number(row[y] ?? 0), 0);
+  return (
+    <figure aria-label={ariaLabel} className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+      <div style={{ height }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart accessibilityLayer>
+            <Pie
+              data={data}
+              dataKey={y}
+              nameKey={x}
+              innerRadius={donut ? "55%" : 0}
+              outerRadius="85%"
+              paddingAngle={1.5}
+              stroke="var(--color-paper)"
+              strokeWidth={1.5}
+              isAnimationActive={false}
+            >
+              {data.map((row, i) => (
+                <Cell key={String(row[x])} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip
+              content={(props) => (
+                <ChartTooltip {...props} valueFormat={valueFormat} xFormat="text" />
+              )}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <ul className="grid content-center gap-1.5 pr-2 text-xs text-ink-2">
+        {data.map((row, i) => {
+          const value = Number(row[y] ?? 0);
+          return (
+            <li key={String(row[x])} className="flex items-center gap-2">
+              <span
+                aria-hidden
+                className="size-2.5 rounded-xs"
+                style={{ background: PIE_COLORS[i % PIE_COLORS.length] }}
+              />
+              <span className="max-w-40 truncate text-ink">{String(row[x])}</span>
+              <span className="ml-auto font-mono tabular">
+                {total > 0 ? `${((value / total) * 100).toFixed(0)}%` : formatValue(value, valueFormat)}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </figure>
+  );
+}
+
+/** Scatter plot for the relationship between two numeric measures. */
+export function ScatterChartView({
+  data,
+  x,
+  y,
+  xLabel,
+  yLabel,
+  valueFormat,
+  height = 300,
+  ariaLabel,
+}: {
+  data: Row[];
+  x: string;
+  y: string;
+  xLabel: string;
+  yLabel: string;
+  valueFormat: ValueFormat;
+  height?: number;
+  ariaLabel: string;
+}) {
+  return (
+    <figure aria-label={ariaLabel} className="grid gap-3">
+      <div style={{ height }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ScatterChart margin={{ top: 8, right: 16, bottom: 4, left: 0 }} accessibilityLayer>
+            <CartesianGrid stroke="var(--color-line)" />
+            <XAxis
+              type="number"
+              dataKey={x}
+              name={xLabel}
+              tick={tick}
+              tickLine={false}
+              axisLine={{ stroke: "var(--color-line-strong)" }}
+              tickFormatter={(v: number) => formatValue(v, "number", { compact: true })}
+              domain={["auto", "auto"]}
+            />
+            <YAxis
+              type="number"
+              dataKey={y}
+              name={yLabel}
+              tick={tick}
+              tickLine={false}
+              axisLine={false}
+              width={64}
+              tickFormatter={(v: number) => formatValue(v, valueFormat, { compact: true })}
+              domain={["auto", "auto"]}
+            />
+            <Tooltip
+              cursor={{ stroke: "var(--color-line-strong)", strokeDasharray: "3 3" }}
+              content={(props) => (
+                <ChartTooltip {...props} valueFormat={valueFormat} xFormat="text" />
+              )}
+            />
+            <Scatter
+              data={data}
+              fill="var(--color-series-1)"
+              fillOpacity={0.75}
+              isAnimationActive={false}
+            />
+          </ScatterChart>
+        </ResponsiveContainer>
+      </div>
+      <p className="pl-1 text-xs text-ink-2">
+        {yLabel} vs {xLabel} — each point is one result row
+      </p>
+    </figure>
   );
 }

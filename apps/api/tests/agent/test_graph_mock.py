@@ -438,3 +438,24 @@ async def test_unsafe_sql_is_never_retried() -> None:
     assert h.provider.calls_for("recover_error") == []  # no model call spent on it
     assert final["termination_reason"] == "all_steps_failed"
     assert final["response"].status == "failed"
+
+
+async def test_follow_up_questions_are_suggested_and_grounded() -> None:
+    provider = sc.revenue_provider()
+    provider.script["compose_response"] = [
+        {
+            "summary": "Revenue fell 15% in September, to $85,000.",
+            "follow_up_questions": [
+                "Which Electronics products drove the decline?",
+                "How did revenue by region change over the last six months?",
+                "Did the 42% discount campaign affect this?",  # 42% is ungrounded → dropped
+            ],
+        }
+    ]
+    final = await run(Harness(provider, sc.revenue_executor()))
+    response = final["response"]
+    assert response.status == "answered" and response.summary_source == "model"
+    assert response.follow_up_questions == [
+        "Which Electronics products drove the decline?",
+        "How did revenue by region change over the last six months?",
+    ]

@@ -193,7 +193,19 @@ class ComputedFact(BaseModel):
 
 
 class ChartSpec(BaseModel):
-    chart_type: Literal["bar", "grouped_bar", "line", "area", "scatter", "pie", "kpi", "table"]
+    chart_type: Literal[
+        "bar",
+        "grouped_bar",
+        "horizontal_bar",
+        "line",
+        "area",
+        "scatter",
+        "pie",
+        "donut",
+        "histogram",
+        "kpi",
+        "table",
+    ]
     step_id: str
     x: str | None = None
     y: list[str] = Field(default_factory=list, max_length=4)
@@ -258,6 +270,7 @@ class FinalResponse(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     clarification_question: str | None = None
     clarification_options: list[str] = Field(default_factory=list)
+    follow_up_questions: list[str] = Field(default_factory=list, max_length=3)
     summary_source: Literal["model", "template"] = "template"
 
 

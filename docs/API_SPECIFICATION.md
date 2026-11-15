@@ -2,8 +2,8 @@
 
 | Field | Value |
 |---|---|
-| Document | API_SPECIFICATION v0.5 |
-| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13): §3 Datasets as built. v0.4 (2026-11-14): auth, conversations, analysis sessions, history, reports and readiness as built in Phase 4 (§0 lists every endpoint). v0.5 (2026-11-14): sessions run the LangGraph agent; result and trace (Phase 5). Decisions: see DECISION_LOG.md |
+| Document | API_SPECIFICATION v0.6 |
+| Status | v0.2 approved 2026-11-12. v0.3 (2026-11-13): §3 Datasets as built. v0.4 (2026-11-14): auth, conversations, analysis sessions, history, reports and readiness as built in Phase 4 (§0 lists every endpoint). v0.5 (2026-11-14): sessions run the LangGraph agent; result and trace (Phase 5). v0.6 (2026-11-15): `follow_up_questions` and the full chart-type enum (Phase 7, D52). Decisions: see DECISION_LOG.md |
 | Base URL | `https://<api-host>/api/v1` |
 | Format | JSON (UTF-8); `multipart/form-data` for uploads; `text/event-stream` for run events |
 | Source of truth | FastAPI-generated OpenAPI 3.1 at `/api/v1/openapi.json`. The frontend types are generated from it. |
@@ -206,6 +206,7 @@ type RunResult = {
   response: { status: "answered" | "partial" | "clarification_needed" | "out_of_scope" | "failed";
     summary: string; key_findings: Insight[]; caveats: string[]; assumptions: string[];
     clarification_question: string | null; clarification_options: string[];
+    follow_up_questions: string[];   // ≤ 3 suggested next questions; any whose numbers aren't grounded in facts/rows are dropped (Phase 7)
     summary_source: "model" | "template" };
   steps: { step_id: string; purpose: string; expected_output: string; depends_on: string[];
     status: "succeeded" | "failed" | "skipped" | "pending"; sql: string | null; explanation: string | null;
@@ -214,6 +215,12 @@ type RunResult = {
   facts: { fact_id: string; step_id: string; kind: string; description: string; value: unknown;
     unit: string | null; inputs: object }[];
   charts: (ChartSpec & { data: unknown[][]; columns: string[] })[];
+  // ChartSpec = { chart_type: "bar" | "grouped_bar" | "horizontal_bar" | "line" | "area" | "scatter"
+  //   | "pie" | "donut" | "histogram" | "kpi" | "table"; step_id: string; x: string | null; y: string[];
+  //   series: string | null; title: string; subtitle: string | null; value_format: "number" | "integer"
+  //   | "currency" | "percent"; fallback_reason: string | null }  — validated against the step's real
+  //   columns/rows; an invalid spec falls back to "table" with the reason recorded (Phase 7 added
+  //   horizontal_bar, pie/donut, scatter as first-class, histogram, and the fallback contract).
   verification: { round: number; metrics_check: string; time_period_check: string;
     verified_insights: number; rejected_insights: number; removed: object[]; uncertainty: string[] } | null;
   schema_tables: string[]; budget: object; errors: string[]; model: { provider: string; name: string } };

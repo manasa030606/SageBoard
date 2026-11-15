@@ -132,6 +132,11 @@ export function ExecutionTimeline({
 }
 
 const PENDING: Record<TimelineStep["node"], string> = {
+  load_context: "Loading the dataset catalog",
+  check_result: "Checking the result",
+  finish_step: "Closing the step",
+  recover_error: "Correcting the query",
+  compose_response: "Composing the answer",
   understand_query: "Understanding the question",
   retrieve_schema: "Reading the schema",
   plan_analysis: "Planning the analysis",

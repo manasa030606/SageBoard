@@ -1,8 +1,16 @@
 "use client";
 
+import { formatValue } from "@/lib/format";
 import type { ChartSpec, ResultTable } from "@/types/domain";
 
-import { BarChartView, LineChartView, type SeriesDef } from "./charts";
+import {
+  BarChartView,
+  LineChartView,
+  PieChartView,
+  ScatterChartView,
+  type SeriesDef,
+} from "./charts";
+import { binValues } from "./histogram";
 
 /**
  * Renders an agent-produced ChartSpec. Only chart types in the spec enum are
@@ -79,6 +87,69 @@ export function ChartRenderer({
           ariaLabel={aria}
         />
       );
+    case "pie":
+    case "donut": {
+      const y = spec.y[0];
+      if (!y) return null;
+      return (
+        <PieChartView
+          data={table.rows}
+          x={spec.x}
+          y={y}
+          valueFormat={spec.valueFormat}
+          donut={spec.chartType === "donut"}
+          height={height}
+          ariaLabel={aria}
+        />
+      );
+    }
+    case "scatter": {
+      const y = spec.y[0];
+      if (!y) return null;
+      return (
+        <ScatterChartView
+          data={table.rows}
+          x={spec.x}
+          y={y}
+          xLabel={label(spec.x)}
+          yLabel={label(y)}
+          valueFormat={spec.valueFormat}
+          height={height}
+          ariaLabel={aria}
+        />
+      );
+    }
+    case "histogram": {
+      const y = spec.y[0];
+      if (!y) return null;
+      const bins = binValues(table.rows.map((row) => row[y]));
+      return (
+        <BarChartView
+          data={bins.map((b) => ({ bin: b.bin, count: b.count }))}
+          x="bin"
+          series={[{ key: "count", label: `${label(y)} (rows)` }]}
+          valueFormat="integer"
+          height={height}
+          ariaLabel={aria}
+        />
+      );
+    }
+    case "kpi": {
+      const row = table.rows[0];
+      if (!row) return null;
+      return (
+        <figure aria-label={aria} className="flex flex-wrap gap-8 px-2 py-4">
+          {spec.y.map((key) => (
+            <div key={key}>
+              <p className="text-xs text-ink-2">{label(key)}</p>
+              <p className="mt-1 font-mono text-[32px] leading-none font-medium text-ink tabular">
+                {formatValue(Number(row[key] ?? 0), spec.valueFormat)}
+              </p>
+            </div>
+          ))}
+        </figure>
+      );
+    }
     default:
       return null;
   }
