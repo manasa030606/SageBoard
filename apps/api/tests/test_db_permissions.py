@@ -1,4 +1,4 @@
-"""Integration tests for the base role model (docs/adr/0002).
+"""Integration tests for the base role model (ADR-0002).
 
 They connect as the real runtime roles and assert that PostgreSQL itself refuses
 what each role must not do. Skipped unless the role-specific URLs are provided:

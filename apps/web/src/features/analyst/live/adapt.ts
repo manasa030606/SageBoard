@@ -28,7 +28,7 @@ const INTEGER_TYPES = new Set(["int2", "int4", "int8", "integer", "bigint", "sma
 const NUMERIC_TYPES = new Set(["numeric", "float4", "float8", "double precision", "money", "real"]);
 const MIDNIGHT = /^(\d{4}-\d{2}-\d{2})T00:00:00(?:\.0+)?(?:Z|\+00:?00)$/;
 
-export function columnLabel(name: string): string {
+function columnLabel(name: string): string {
   const words = name.replaceAll("_", " ").trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }

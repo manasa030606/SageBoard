@@ -30,11 +30,22 @@ test("sign up, load the sample dataset and ask a question", async ({ page }) => 
   await expect(page).toHaveURL(/\/app/);
 
   await page.goto("/app/data");
+  // Wait for the request to finish before leaving the page: navigating away would abort it.
+  const provisioned = page.waitForResponse(
+    (r) => r.url().endsWith("/datasets/demo") && r.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Load sample dataset" }).first().click();
-  await expect(page.getByText("Couldn’t load the sample")).toHaveCount(0);
-  await expect(page.getByText(/orders/i).first()).toBeVisible();
+  const response = await provisioned;
+  expect(
+    response.ok(),
+    `POST ${response.url()} -> ${response.status()} ${await response.text()}`,
+  ).toBe(true);
+  const body = (await response.json()) as { dataset: { name: string; status: string } };
+  expect(body.dataset.status).toBe("ready");
+  await expect(page.getByText(body.dataset.name).first()).toBeVisible();
 
   await page.goto("/app/analyst");
+  await expect(page.locator("#analyst-question")).toBeVisible();
   await ask(page, ANSWERABLE);
   await expect(page.getByRole("region", { name: "What the data shows" })).toBeVisible({
     timeout: 60_000,

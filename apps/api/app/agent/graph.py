@@ -20,7 +20,7 @@
                                                                compose_response → END
 
 Every router can short-circuit to ``compose_response`` (terminated, cancelled, out of
-budget). See docs/AGENT_WORKFLOW.md for the full state-transition table.
+budget). See docs/architecture/ARCHITECTURE.md for the full state-transition table.
 """
 
 from __future__ import annotations

@@ -3,13 +3,13 @@
 #
 # Runs automatically on first start of the Docker Compose Postgres container
 # (docker-entrypoint-initdb.d). It can also be run by hand against any PostgreSQL 16
-# (including Neon, connected as the project owner role) — see infra/README.md.
+# (including Neon, connected as the project owner role) — see docs/development/DEVELOPMENT.md.
 #
 # Required environment variables (never hardcode passwords here):
 #   POSTGRES_DB, SAGEBOARD_OWNER_PASSWORD, SAGEBOARD_APP_PASSWORD,
 #   SAGEBOARD_INGEST_PASSWORD, SAGEBOARD_EXECUTOR_PASSWORD
 #
-# Role model (docs/adr/0002-database-topology-and-permissions.md):
+# Role model (ADR-0002 in docs/development/DECISIONS.md):
 #   sageboard_owner     owns the `app` and `lg` schemas, runs migrations
 #   sageboard_app       API runtime: read/write on `app` only
 #   sageboard_ingest    creates per-dataset schemas + reader roles (Phase 3)

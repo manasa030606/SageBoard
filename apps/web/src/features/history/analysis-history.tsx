@@ -14,7 +14,7 @@ import { fileSlug, saveFile } from "@/lib/download";
 import { formatInteger, formatRelative } from "@/lib/format";
 import { errorMessage, toApiError, useApi } from "@/lib/use-api";
 
-const STATUS: Record<SessionStatus, { label: string; tone: Tone }> = {
+export const SESSION_STATUS: Record<SessionStatus, { label: string; tone: Tone }> = {
   succeeded: { label: "Answered", tone: "positive" },
   partial: { label: "Partial", tone: "warning" },
   failed: { label: "Failed", tone: "critical" },
@@ -236,7 +236,7 @@ export function AnalysisHistory() {
       ) : (
         <ul className="mt-6 grid gap-3" aria-label="Past analyses">
           {items.map((item) => {
-            const state = STATUS[item.status];
+            const state = SESSION_STATUS[item.status];
             const reportId = reportIds[item.id] ?? item.report_id;
             const finished = item.status === "succeeded" || item.status === "partial";
             const open = `/app/analyst?conversation=${item.conversation_id}&session=${item.id}`;

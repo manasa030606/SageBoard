@@ -25,7 +25,7 @@ import { errorMessage, useApi } from "@/lib/use-api";
 
 import { UploadDrawer } from "./upload-drawer";
 
-const STATUS: Record<DatasetStatus, { label: string; tone: Tone }> = {
+export const DATASET_STATUS: Record<DatasetStatus, { label: string; tone: Tone }> = {
   ready: { label: "Ready", tone: "positive" },
   loading: { label: "Loading", tone: "info" },
   failed: { label: "Failed", tone: "critical" },
@@ -231,11 +231,11 @@ function DatasetList({
                 </TD>
                 <TD className="hidden text-ink-2 md:table-cell">{SOURCE[d.source_type]}</TD>
                 <TD>
-                  <Badge tone={STATUS[d.status].tone} dot>
+                  <Badge tone={DATASET_STATUS[d.status].tone} dot>
                     {d.status === "loading" ? (
                       <Loader2 className="size-3 animate-spin" aria-hidden />
                     ) : null}
-                    {STATUS[d.status].label}
+                    {DATASET_STATUS[d.status].label}
                   </Badge>
                 </TD>
                 <TD numeric className="hidden sm:table-cell">

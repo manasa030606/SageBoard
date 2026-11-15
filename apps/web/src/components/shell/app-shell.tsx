@@ -111,13 +111,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <NavLinks items={PRIMARY} onNavigate={onNavigate} />
         <div className="mt-auto grid gap-3 pb-3">
           <NavLinks items={SECONDARY} onNavigate={onNavigate} />
-          <div className="rounded-sm border border-amber/40 bg-amber-100/60 px-3 py-2.5">
-            <p className="text-xs font-medium text-amber-ink">Sample analysis</p>
-            <p className="mt-0.5 text-2xs leading-4 text-ink-2">
-              Dashboard and Analyst show recorded sample runs until the AI analyst is connected.
-              Data sources, history and reports are live.
-            </p>
-          </div>
           <UserMenu />
         </div>
       </nav>

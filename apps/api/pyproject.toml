@@ -29,7 +29,6 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.8",
     "mypy>=1.13",
-    "httpx2>=2.16.0",
     "hypothesis>=6.100",
     "pypdf>=7.1.0",
 ]

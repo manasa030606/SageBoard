@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps } from "react";
 
 import { cn } from "@/lib/cn";
 
@@ -68,27 +68,4 @@ export function TD({
       {...props}
     />
   );
-}
-
-/** Horizontal proportion bar used inside table cells. */
-export function InlineBar({
-  value,
-  max,
-  tone = "forest",
-}: {
-  value: number;
-  max: number;
-  tone?: "forest" | "amber" | "navy";
-}) {
-  const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
-  const fill = { forest: "bg-forest", amber: "bg-amber", navy: "bg-navy" }[tone];
-  return (
-    <div aria-hidden className="h-1.5 w-full rounded-full bg-warm-300/70">
-      <div className={cn("h-full rounded-full", fill)} style={{ width: `${pct}%` }} />
-    </div>
-  );
-}
-
-export function TableCaption({ children }: { children: ReactNode }) {
-  return <caption className="sr-only">{children}</caption>;
 }

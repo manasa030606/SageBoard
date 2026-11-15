@@ -1,4 +1,4 @@
-"""SQL Guard: decides whether model-written SQL may run (SECURITY_DESIGN §4).
+"""SQL Guard: decides whether model-written SQL may run (docs/security/SECURITY.md).
 
 The Guard is a pure function. It never talks to a database. It parses the SQL with
 SQLGlot (PostgreSQL dialect) and accepts only a single read-only query over the
@@ -37,7 +37,7 @@ from sqlglot.optimizer.qualify import qualify
 from app.agent.state import GuardViolation
 
 MAX_SQL_CHARS = 20_000
-MAX_JOINS = 6  # SECURITY_DESIGN §4.6
+MAX_JOINS = 6
 MAX_SUBQUERY_DEPTH = 4
 
 _FORBIDDEN_NODE_NAMES = (

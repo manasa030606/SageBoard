@@ -5,8 +5,8 @@ import type { ColumnType } from "@/types/domain";
  * and suggest column types. This is only a preview for the review step; the
  * authoritative parsing and loading happen server-side (ingestion, later phase).
  */
-export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
-export const ACCEPTED_EXTENSIONS = [".csv"] as const;
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const ACCEPTED_EXTENSIONS = [".csv"] as const;
 
 export interface PreviewColumn {
   name: string;

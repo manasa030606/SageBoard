@@ -1,4 +1,4 @@
-"""Public error envelope (API_SPECIFICATION §1.3)."""
+"""Public error envelope (docs/architecture/ARCHITECTURE.md)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,6 @@
-# Sageboard — Product Requirements Document
+# Sageboard — Product Requirements Document (archived)
+
+> **Archived.** This is the original product brief (v0.2, 2026-11-12). It records intent, users and requirements, but the built system differs in places: no streaming transport (the UI polls), no pinned dashboard widgets, CSV upload only, no XLSX. For the system as built see [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) and [DEVELOPMENT.md](../development/DEVELOPMENT.md). Names of other documents below refer to the pre-consolidation set.
 
 | Field | Value |
 |---|---|

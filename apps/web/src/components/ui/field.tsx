@@ -15,10 +15,6 @@ export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input className={cn(control, "h-9 px-3", className)} {...props} />;
 }
 
-export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
-  return <textarea className={cn(control, "px-3 py-2 leading-6", className)} {...props} />;
-}
-
 export function Select({
   className,
   children,
@@ -80,49 +76,6 @@ export function Field({
           {error}
         </p>
       ) : null}
-    </div>
-  );
-}
-
-export function Switch({
-  checked,
-  onChange,
-  label,
-  description,
-}: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-  label: string;
-  description?: string;
-}) {
-  const id = useId();
-  return (
-    <div className="flex items-start justify-between gap-6">
-      <div>
-        <label htmlFor={id} className="text-sm font-medium text-ink">
-          {label}
-        </label>
-        {description ? <p className="mt-0.5 text-[13px] text-ink-2">{description}</p> : null}
-      </div>
-      <button
-        id={id}
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={cn(
-          "relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors duration-150",
-          checked ? "border-forest bg-forest" : "border-line-strong bg-warm-300",
-        )}
-      >
-        <span
-          aria-hidden
-          className={cn(
-            "absolute top-0.5 left-0.5 size-3.5 rounded-full bg-paper transition-transform duration-150",
-            checked && "translate-x-4",
-          )}
-        />
-      </button>
     </div>
   );
 }

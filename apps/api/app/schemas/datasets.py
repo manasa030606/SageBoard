@@ -1,4 +1,4 @@
-"""Dataset API contracts (API_SPECIFICATION §3). No credentials or schema names leak out."""
+"""Dataset API contracts (docs/architecture/ARCHITECTURE.md). No credentials or schema names leak out."""
 
 from __future__ import annotations
 

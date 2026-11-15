@@ -429,9 +429,6 @@ class RunManager:
         entry[1].set()
         return True
 
-    def is_running(self, session_id: uuid.UUID) -> bool:
-        return session_id in self._runs
-
     async def wait(self, session_id: uuid.UUID) -> None:
         entry = self._runs.get(session_id)
         if entry is not None:

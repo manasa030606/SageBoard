@@ -26,7 +26,7 @@ import type { ValueFormat } from "@/types/domain";
  * Chart building blocks. One axis style, one tooltip and one palette so every
  * chart in the product reads as the same system.
  */
-export const SERIES_COLORS = [
+const SERIES_COLORS = [
   "var(--color-series-1)",
   "var(--color-series-2)",
   "var(--color-series-3)",
@@ -294,45 +294,6 @@ export function BarChartView({
         </ResponsiveContainer>
       </div>
     </figure>
-  );
-}
-
-/** Tiny inline trend line for KPI tiles (decorative; the value is the content). */
-export function Sparkline({
-  values,
-  tone = "forest",
-}: {
-  values: number[];
-  tone?: "forest" | "amber" | "ink";
-}) {
-  if (values.length < 2) return null;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const w = 96;
-  const h = 28;
-  const points = values
-    .map(
-      (v, i) =>
-        `${((i / (values.length - 1)) * w).toFixed(1)},${(h - ((v - min) / range) * (h - 4) - 2).toFixed(1)}`,
-    )
-    .join(" ");
-  const stroke = {
-    forest: "var(--color-forest)",
-    amber: "var(--color-amber)",
-    ink: "var(--color-ink-3)",
-  }[tone];
-  return (
-    <svg aria-hidden viewBox={`0 0 ${w} ${h}`} className="h-7 w-24 overflow-visible">
-      <polyline
-        points={points}
-        fill="none"
-        stroke={stroke}
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }
 

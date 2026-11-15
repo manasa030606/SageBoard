@@ -1,8 +1,6 @@
 """Print the `app` schema as Markdown tables, straight from the SQLAlchemy models.
 
-Regenerates the table reference in docs/DATABASE_DESIGN.md so the doc can't drift:
-
-    uv run python scripts/schema_reference.py > /tmp/tables.md
+Run: uv run python scripts/schema_reference.py > /tmp/tables.md
 """
 
 from __future__ import annotations

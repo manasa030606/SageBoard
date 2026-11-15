@@ -5,7 +5,7 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
-  // A full nonce-based Content-Security-Policy is added in Phase 12 (SECURITY_DESIGN §7).
+  // A full nonce-based Content-Security-Policy is not added yet (see docs/security/SECURITY.md).
 ];
 
 const nextConfig: NextConfig = {

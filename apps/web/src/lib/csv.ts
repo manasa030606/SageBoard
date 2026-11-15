@@ -1,6 +1,6 @@
 import type { ResultTable } from "@/types/domain";
 
-/** Cells that spreadsheets would interpret as formulas get a leading apostrophe (SECURITY_DESIGN §8). */
+/** Cells that spreadsheets would interpret as formulas get a leading apostrophe (docs/security/SECURITY.md). */
 export function escapeCsvCell(value: string | number): string {
   let text = String(value);
   if (/^[=+\-@\t\r]/.test(text) && typeof value !== "number") text = `'${text}`;

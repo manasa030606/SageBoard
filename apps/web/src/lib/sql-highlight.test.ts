@@ -1,20 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { SAMPLE_SCENARIOS } from "@/mocks/scenarios";
-
 import { escapeCsvCell } from "./csv";
 import { tokenizeSql } from "./sql-highlight";
 
 describe("tokenizeSql", () => {
-  it("round-trips every sample query exactly", () => {
-    for (const s of SAMPLE_SCENARIOS) {
-      for (const a of s.result.sqlAttempts) {
-        expect(
-          tokenizeSql(a.sql)
-            .map((t) => t.text)
-            .join(""),
-        ).toBe(a.sql);
-      }
+  it("round-trips queries exactly, whitespace and comments included", () => {
+    const queries = [
+      "SELECT region, SUM(total) AS revenue\nFROM orders\nWHERE status <> 'cancelled'\nGROUP BY region\nORDER BY revenue DESC\nLIMIT 10",
+      "SELECT 1 -- trailing comment",
+      "  SELECT\t*  FROM   t ;  ",
+    ];
+    for (const sql of queries) {
+      expect(
+        tokenizeSql(sql)
+          .map((t) => t.text)
+          .join(""),
+      ).toBe(sql);
     }
   });
 

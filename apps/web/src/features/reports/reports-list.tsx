@@ -47,7 +47,7 @@ export function ReportsList() {
           description="Reports are saved from finished analyses. Ask a question on the Analyst page, then use “Save as report” on the answer."
           action={
             <ButtonLink href="/app/analyst" variant="secondary">
-              See a sample run
+              Open the analyst
             </ButtonLink>
           }
         />

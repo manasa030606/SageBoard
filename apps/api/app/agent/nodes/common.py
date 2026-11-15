@@ -54,7 +54,7 @@ def sensitive_columns(state: AgentState) -> frozenset[str]:
     """Lower-cased names of columns the dataset marks sensitive (personal data).
 
     Matched by result column *name*, so a query that aliases a sensitive column
-    (``SELECT email AS contact``) is not caught; see SECURITY_DESIGN §6.
+    (``SELECT email AS contact``) is not caught; see docs/security/SECURITY.md.
     """
     context = state.get("schema_context")
     if context is None:

@@ -184,7 +184,7 @@ function Thread({
 
       <div className="flex min-h-0 flex-col">
         <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5 sm:px-6">
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <Button
               variant="ghost"
               size="sm"
@@ -197,7 +197,7 @@ function Thread({
             <Button
               variant="ghost"
               size="sm"
-              className="hidden xl:inline-flex"
+              className="max-xl:hidden"
               onClick={() => {
                 setActiveId(null);
                 setOptimistic([]);
@@ -207,14 +207,14 @@ function Thread({
               New conversation
             </Button>
           </div>
-          <label className="flex items-center gap-2 text-xs text-ink-2">
+          <label className="flex min-w-0 items-center gap-2 text-xs text-ink-2">
             <Database className="size-3.5" aria-hidden />
             Dataset
             <Select
               aria-label="Dataset"
               value={datasetId}
               onChange={(event) => onDataset(event.target.value)}
-              className="min-w-44"
+              className="max-w-44 min-w-0 sm:min-w-44"
             >
               {datasetOptions.map((d) => (
                 <option key={d.id} value={d.id}>

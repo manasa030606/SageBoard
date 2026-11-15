@@ -1,4 +1,4 @@
-"""Sensitive column values must not reach the model (SECURITY_DESIGN §6)."""
+"""Sensitive column values must not reach the model (docs/security/SECURITY.md)."""
 
 from __future__ import annotations
 

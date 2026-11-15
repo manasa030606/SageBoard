@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import statistics
-from collections import defaultdict
 from typing import Any
 
 from evals.cases import BY_ID, CATEGORIES
@@ -167,11 +166,4 @@ def failure_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "known_gap": "known_gap" in BY_ID[r["id"]].tags,
             }
         )
-    return out
-
-
-def group_by_category(records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    out: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for r in records:
-        out[r["category"]].append(r)
     return out

@@ -1,4 +1,4 @@
-/** Mirrors the backend error envelope (API_SPECIFICATION §1.3). */
+/** Mirrors the backend error envelope (docs/architecture/ARCHITECTURE.md, API conventions). */
 export interface ErrorEnvelope {
   error: {
     code: string;

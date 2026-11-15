@@ -1,83 +1,73 @@
 # Sageboard
 
-**An agentic AI system for autonomous business data analysis.** Ask a business question in plain language. Sageboard plans the analysis, writes and validates read-only SQL, runs it, analyses the results, charts them, and reports insights backed by the actual query results.
+Ask questions about your data in plain language. Sageboard plans the analysis, writes read-only SQL, checks it, runs it, charts the result and writes findings that are verified against the query results.
 
-> **Status: Phase 2 — Frontend UI/UX (complete, demo data).** All seven product pages are built on a bundled sample dataset; the AI backend arrives in later phases. Phase 1 (foundation) is complete too. See [`docs/DEVELOPMENT_ROADMAP.md`](docs/DEVELOPMENT_ROADMAP.md).
+Built for business analysts, data analysts, students and small businesses who want answers without writing SQL.
 
-## Repository layout
+## Features
+
+- **Ask in plain language.** The analyst plans one or more queries, runs them, and explains the result with charts and findings.
+- **Safe by construction.** The model never executes anything. Its SQL is parsed and validated, then run read-only under a per-dataset database role with timeouts and a cost check. Sensitive columns are hidden from the model.
+- **Evidence for every claim.** Each number in a finding must match a cited query result; unsupported findings are removed.
+- **Self-correcting.** Failed or empty queries are classified and retried within fixed limits. Unsafe SQL is never retried.
+- **Your data.** Upload a CSV, review the inferred column types, or load the built-in sample dataset.
+- **Conversations, history and reports.** Ask follow-ups, reopen past analyses, inspect every SQL statement, and save an analysis as a report with PDF and Markdown export.
+
+## Stack
+
+| Part | Technology |
+|---|---|
+| Frontend (`apps/web`) | Next.js 16, TypeScript, Tailwind CSS 4, Recharts |
+| Backend (`apps/api`) | FastAPI, SQLAlchemy (async), Alembic, LangGraph, SQLGlot |
+| Database | PostgreSQL 16 |
+| Model | Google Gemini (free tier), or Anthropic / OpenAI, chosen by configuration |
+| Tooling | pnpm, uv, ruff, mypy, ESLint, Vitest, pytest, Playwright |
+
+## Architecture
 
 ```
-sageboard/
-├── apps/
-│   ├── web/        Next.js 16 · TypeScript · Tailwind CSS 4   → see apps/web/README.md
-│   └── api/        FastAPI · SQLAlchemy 2 (async) · Alembic   → see apps/api/README.md
-├── infra/          Local PostgreSQL setup (no Docker needed) + role bootstrap → see infra/README.md
-├── docs/           Blueprint, decision log, ADRs
-├── .github/        CI: ci-api, ci-web, secrets-scan
-└── Makefile        Common commands (make help)
+Browser ── Next.js ── HTTPS/JSON ── FastAPI ── PostgreSQL (app data + one schema per dataset)
+                                        └────── LLM provider (plans and writes; never executes)
 ```
 
-The two apps are independent. They share no code and communicate only over HTTP (`/api/v1`, documented by the API's OpenAPI schema).
+The language model proposes plans, SQL and wording. Deterministic code validates every proposal, runs it with read-only permissions and computes the numbers. See [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md).
 
 ## Prerequisites
 
-| Tool | Version | Install |
-|---|---|---|
-| Node.js | ≥ 20.9 (22 LTS recommended) | https://nodejs.org |
-| pnpm | 10.x | `corepack enable` (bundled with Node) |
-| Python | 3.12 or 3.13 | https://python.org |
-| uv | ≥ 0.5 | `curl -LsSf https://astral.sh/uv/install.sh \| sh` (or `pip install uv`) |
-| PostgreSQL | 16 | `brew install postgresql@16 && brew services start postgresql@16` (or Postgres.app). **Docker is not required.** |
+Node.js 20.9+, pnpm 10, Python 3.12 or 3.13, uv, PostgreSQL 16. Docker is optional. A Google AI Studio API key is needed to answer questions; the rest of the app works without one.
 
-## Quick start (local development)
+## Run it
 
 ```bash
-# 1. Install dependencies (creates apps/api/.venv via uv)
 make install
-
-# 2. Configure environment files (all gitignored; edit the passwords)
-cp infra/.env.example     infra/.env
-cp apps/api/.env.example  apps/api/.env       # use the same passwords as infra/.env
-cp apps/web/.env.example  apps/web/.env.local
-
-# 3. Prepare your local PostgreSQL: creates the database, roles and schema (safe to re-run)
-bash infra/postgres/setup-local.sh
-
-# 4. Apply migrations (as the owner role)
+cp infra/.env.example infra/.env
+cp apps/api/.env.example apps/api/.env        # same passwords as infra/.env; set JWT_SECRET
+cp apps/web/.env.example apps/web/.env.local
+bash infra/postgres/setup-local.sh            # database, roles, schema
 make migrate
-
-# 5. Run the API (terminal 1) and the web app (terminal 2)
-make api        # http://localhost:8000/api/v1/healthz · docs at /api/v1/docs
-make web        # http://localhost:3000
+make api                                      # http://localhost:8000/api/v1/docs
+make web                                      # http://localhost:3000
 ```
 
-Open http://localhost:3000 for the landing page, or http://localhost:3000/app/dashboard for the product. **Settings → System status** (or `/status`) checks the web app, the API and the database live from your browser.
+Open http://localhost:3000, create an account and load the sample dataset from the Data page. To enable the analyst, add a model key (see the development guide). `make help` lists every command.
 
-Prefer Docker? `make db-up` starts PostgreSQL 16 in a container instead of step 3. It is optional. See [`infra/README.md`](infra/README.md).
-
-## Quality checks
+## Tests
 
 ```bash
-make check              # lint + type-check + unit tests + format check (both apps)
-make test-integration   # backend tests against PostgreSQL (see apps/api/README.md)
+make check                 # lint, types, unit tests, formatting (both apps)
+make test-integration      # backend tests against PostgreSQL
+pnpm e2e                   # browser tests, from apps/web
 ```
 
-## Environment & secrets
-
-- Real values live only in `.env` / `.env.local` files, which are gitignored. Each app ships a `.env.example` template.
-- The web app holds **no secrets**. Its only variable, `NEXT_PUBLIC_API_URL`, is public by design.
-- The API validates its configuration at startup and refuses unsafe settings, e.g. a wildcard CORS origin, `http://` origins in production, or the mock LLM in production.
+Setup for the integration and browser tests, and the evaluation framework, are in the docs below.
 
 ## Documentation
 
-| Document | Purpose |
+| Document | Content |
 |---|---|
-| [PRD](docs/PRD.md) | Product scope, users, requirements |
-| [System architecture](docs/SYSTEM_ARCHITECTURE.md) | Components, data flow, deployment |
-| [Agent workflow](docs/AGENT_WORKFLOW.md) | LangGraph nodes, state, routing, tools |
-| [Database design](docs/DATABASE_DESIGN.md) | Schemas, tables, relationships |
-| [API specification](docs/API_SPECIFICATION.md) | REST + SSE contracts |
-| [Security design](docs/SECURITY_DESIGN.md) | Threat model, SQL guard, permissions |
-| [Testing strategy](docs/TESTING_STRATEGY.md) | Test levels, gates, evaluation |
-| [Roadmap](docs/DEVELOPMENT_ROADMAP.md) | Phases and exit criteria |
-| [Decision log](docs/DECISION_LOG.md) + [ADRs](docs/adr/) | Every architectural decision |
+| [Architecture](docs/architecture/ARCHITECTURE.md) | Components, data flow, database, API, the analysis agent |
+| [Security](docs/security/SECURITY.md) | Threat model, SQL validation, database roles, application security |
+| [Development](docs/development/DEVELOPMENT.md) | Setup, configuration, testing, known limitations, status |
+| [Decisions](docs/development/DECISIONS.md) | Decision log and architecture decision records |
+| [Evaluation](docs/eval/README.md) | Evaluation framework, results, failure analysis |
+| [Original PRD](docs/archive/PRD.md) | Archived product brief |

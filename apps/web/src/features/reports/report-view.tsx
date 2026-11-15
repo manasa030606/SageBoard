@@ -79,6 +79,8 @@ function ReportBody({ data }: { data: ReportDetail }) {
   const c = data.content;
   const method = c.methodology;
   const steps = c.steps?.filter((s) => s.sql) ?? [];
+  // A "table" chart is just the result table, which the queries section already shows.
+  const plottedCharts = c.charts?.filter((chart) => chart.chart_type !== "table") ?? [];
   const meta = [
     method?.intent ? `Intent: ${method.intent}` : null,
     method?.time_range ? `Time range: ${method.time_range}` : null,
@@ -165,7 +167,8 @@ function ReportBody({ data }: { data: ReportDetail }) {
           ) : null}
           {method.verification ? (
             <p className="mt-4 text-[12.5px] text-ink-2">
-              {method.verification.verified_insights} insights verified,{" "}
+              {method.verification.verified_insights}{" "}
+              {method.verification.verified_insights === 1 ? "insight" : "insights"} verified,{" "}
               {method.verification.rejected_insights} rejected.
             </p>
           ) : null}
@@ -191,14 +194,14 @@ function ReportBody({ data }: { data: ReportDetail }) {
                   truncated: q.truncated,
                 }))
             ).map((q) => (
-              <div key={q.key}>
+              <div key={q.key} className="min-w-0">
                 <p className="mb-1.5 text-[13px] text-ink-2">
                   {q.label}
                   {q.rows != null
                     ? ` · ${formatInteger(q.rows)} rows${q.truncated ? "+" : ""}`
                     : ""}
                 </p>
-                <div className="overflow-hidden rounded-sm border border-line">
+                <div className="rounded-sm border border-line">
                   <SqlCode sql={q.sql} />
                 </div>
               </div>
@@ -233,9 +236,9 @@ function ReportBody({ data }: { data: ReportDetail }) {
           </Section>
 
           <Section title="Visualizations">
-            {c.charts?.length ? (
+            {plottedCharts.length ? (
               <div className="grid gap-4 md:grid-cols-2">
-                {c.charts.map((chart, i) => (
+                {plottedCharts.map((chart, i) => (
                   <SavedChart key={`${chart.step_id}-${i}`} chart={chart} />
                 ))}
               </div>
@@ -338,7 +341,7 @@ export function ReportView() {
           <ArrowLeft className="size-3.5" aria-hidden /> All reports
         </Link>
         {data ? (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button
               size="sm"
               onClick={() => void exportAs("pdf")}

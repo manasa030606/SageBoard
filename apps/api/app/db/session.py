@@ -2,7 +2,7 @@
 
 This engine connects as the application role (``sageboard_app``). Dataset queries
 will use a separate, restricted executor pool introduced in Phase 4 — the two are
-never shared (docs/adr/0002-database-topology-and-permissions.md).
+never shared (ADR-0002 in docs/development/DECISIONS.md).
 """
 
 from __future__ import annotations

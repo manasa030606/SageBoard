@@ -18,7 +18,7 @@ from typing import Annotated
 import structlog
 from fastapi import Depends, Request
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.runner import RunManager
 from app.auth.cookies import ACCESS_COOKIE, CSRF_COOKIE, CSRF_HEADER
@@ -54,10 +54,6 @@ def get_databases(request: Request) -> Databases:
 
 
 DatabasesDep = Annotated[Databases, Depends(get_databases)]
-
-
-def get_engine(databases: DatabasesDep) -> AsyncEngine | None:
-    return databases.app_engine
 
 
 def get_health_service(settings: SettingsDep, databases: DatabasesDep) -> HealthService:

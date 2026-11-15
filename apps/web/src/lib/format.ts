@@ -21,22 +21,11 @@ const currencyCompact = new Intl.NumberFormat(LOCALE, {
   minimumFractionDigits: 0,
   maximumFractionDigits: 1,
 });
-const currencyCents = new Intl.NumberFormat(LOCALE, {
-  style: "currency",
-  currency: CURRENCY,
-  maximumFractionDigits: 2,
-  minimumFractionDigits: 2,
-});
 const integer = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 });
 const compact = new Intl.NumberFormat(LOCALE, { notation: "compact", maximumFractionDigits: 1 });
 
-export function formatCurrency(
-  value: number,
-  opts: { compact?: boolean; cents?: boolean } = {},
-): string {
-  if (opts.compact) return currencyCompact.format(value);
-  if (opts.cents) return currencyCents.format(value);
-  return currencyFull.format(value);
+function formatCurrency(value: number, opts: { compact?: boolean } = {}): string {
+  return opts.compact ? currencyCompact.format(value) : currencyFull.format(value);
 }
 
 export function formatInteger(value: number, opts: { compact?: boolean } = {}): string {

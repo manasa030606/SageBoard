@@ -35,10 +35,6 @@ class RateLimiter:
                 self._prune(now, window_s)
             return None
 
-    def reset(self, key: str) -> None:
-        with self._lock:
-            self._hits.pop(key, None)
-
     def _prune(self, now: float, window_s: float) -> None:
         for key in [k for k, v in self._hits.items() if not v or v[-1] <= now - window_s]:
             del self._hits[key]

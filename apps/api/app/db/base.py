@@ -57,7 +57,3 @@ class CreatedAtMixin:
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-
-
-def uuid_pk() -> Mapped[uuid.UUID]:
-    return mapped_column(primary_key=True, default=uuid7)

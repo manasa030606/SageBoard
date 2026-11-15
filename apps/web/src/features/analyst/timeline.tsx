@@ -153,8 +153,3 @@ const PENDING: Record<TimelineStep["node"], string> = {
 function pendingLabel(step: TimelineStep): string {
   return PENDING[step.node];
 }
-
-export function currentActivity(steps: TimelineStep[], revealed: number): string {
-  const next = steps[revealed];
-  return next ? `${pendingLabel(next)}…` : "Finishing…";
-}

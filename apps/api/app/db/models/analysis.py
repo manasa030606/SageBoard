@@ -234,5 +234,5 @@ class Report(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
     summary_edited_by_user: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Immutable snapshot of sections, charts, insights and SQL (see API_SPECIFICATION §7).
+    # Immutable snapshot of sections, charts, insights and SQL (see docs/architecture/ARCHITECTURE.md).
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
