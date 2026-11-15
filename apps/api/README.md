@@ -71,6 +71,7 @@ All settings are environment variables (or `.env`), validated at startup by `app
 | `MIGRATION_DATABASE_URL` | unset | `sageboard_owner`: Alembic only; on Neon use the **direct** endpoint |
 | `INGEST_DATABASE_URL` | unset | `sageboard_ingest`: creates dataset schemas and reader roles, loads data |
 | `EXECUTOR_DATABASE_URL` | unset | `sageboard_executor`: read-only queries, always under a dataset's reader role |
+| `EXECUTOR_MAX_PLAN_COST` | `5000000` | Refuse agent queries whose EXPLAIN plan cost exceeds this (cost units; 0 = off). One "aggregate earlier" retry is allowed |
 | `EXECUTOR_STATEMENT_TIMEOUT_MS` | `10000` | Per-query timeout for the executor |
 | `UPLOAD_MAX_BYTES` / `_ROWS` / `_COLUMNS` | 25 MB / 1,000,000 / 200 | Upload limits |
 | `UPLOAD_DIR`, `UPLOAD_TTL_MINUTES` | system temp, `60` | Private (0700) staging dir; unreviewed uploads are swept |

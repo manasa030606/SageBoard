@@ -114,6 +114,8 @@ class AnalysisPlan(BaseModel):
 
 ErrorCategory = Literal[
     "guard_rejected",
+    "unsafe_query",
+    "too_expensive",
     "syntax_error",
     "unknown_table",
     "unknown_column",
@@ -153,7 +155,7 @@ class SQLAttempt(BaseModel):
     guard_status: Literal["pending", "accepted", "rejected"] = "pending"
     guard_violations: list[GuardViolation] = Field(default_factory=list)
     normalized_sql: str | None = None
-    exec_status: Literal["not_run", "ok", "error", "timeout"] = "not_run"
+    exec_status: Literal["not_run", "ok", "error", "timeout", "cancelled"] = "not_run"
     error_code: str | None = None  # SQLSTATE
     exec_error: str | None = None  # sanitised database message
     exec_ms: int | None = None

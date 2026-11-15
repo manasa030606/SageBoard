@@ -56,6 +56,18 @@ A test (TESTING_STRATEGY §5) disables L2 and runs the adversarial suite directl
 
 ## 4. SQL Guard specification
 
+> **As built (Phases 5–6): see [SQL_SAFETY.md](SQL_SAFETY.md)** for the authoritative
+> validation pipeline, error taxonomy, retry policy, cost gate, cancellation and test
+> matrix. Deviations from the design below, decided during implementation:
+> §4.1 — a bare trailing `;` is tolerated (models emit it; fuzzing proves a tail only
+> passes when it parses to nothing). §4.2 — recursive CTEs, the join cap (6) and the
+> subquery-depth cap (4) are enforced as designed since Phase 6. §4.3 — **all** table
+> functions are rejected (stricter than the design's `unnest` exception). §4.5 — the
+> function policy is hybrid: SQLGlot-typed functions pass, untyped ones need a small
+> allowlist, and a denylist regex blocks the server surface even when typed. §4.6 —
+> cost control is the EXPLAIN gate + statement timeout (no per-query EXPLAIN output in
+> results). Unsafe queries and permission errors are never retried (D51).
+
 `validate(sql: str, catalog: DatasetCatalog, policy: GuardPolicy) -> GuardResult`, a pure function with no I/O.
 
 ```python

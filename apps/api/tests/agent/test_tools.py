@@ -86,7 +86,33 @@ def _attempt(**kw: object) -> SQLAttempt:
                 "guard_status": "rejected",
                 "guard_violations": [GuardViolation(code="FORBIDDEN_FUNCTION", message="m")],
             },
+            "unsafe_query",
+            False,
+        ),
+        (
+            {
+                "guard_status": "rejected",
+                "guard_violations": [GuardViolation(code="MULTIPLE_STATEMENTS", message="m")],
+            },
+            "unsafe_query",
+            False,
+        ),
+        (
+            {
+                "guard_status": "rejected",
+                "guard_violations": [GuardViolation(code="EMPTY_SQL", message="m")],
+            },
             "guard_rejected",
+            True,
+        ),
+        (
+            {"guard_status": "accepted", "exec_status": "error", "error_code": "25006"},
+            "unsafe_query",
+            False,
+        ),
+        (
+            {"guard_status": "accepted", "exec_status": "error", "error_code": "COST_LIMIT"},
+            "too_expensive",
             True,
         ),
         (

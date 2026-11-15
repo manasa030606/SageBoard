@@ -409,3 +409,32 @@ async def test_column_labels_copied_with_their_type_still_work() -> None:
     # the model now sees names and types as separate fields
     analysis_prompt = provider.calls_for("analyze_results")[0].text
     assert '{"name": "revenue_before", "type": "numeric"}' in analysis_prompt
+
+
+async def test_unsafe_sql_is_never_retried() -> None:
+    """Phase 6 policy: recovery is for honest mistakes. A write attempt fails the step
+    immediately — no model call, no second attempt, nothing sent to the database."""
+    provider = sc.revenue_provider()
+    provider.script["plan_analysis"] = [{**sc.PLAN, "steps": [sc.PLAN["steps"][0]]}]
+    provider.script["generate_sql"] = [{"sql": "DELETE FROM orders WHERE status = 'cancelled'"}]
+    for key in (
+        "recover_error",
+        "analyze_results",
+        "generate_visualization",
+        "generate_insights",
+        "verify_insights",
+        "compose_response",
+    ):
+        provider.script[key] = []
+    h = Harness(provider, sc.revenue_executor())
+    final = await run(h)
+    s1 = final["step_results"]["s1"]
+    assert len(s1.attempts) == 1  # exactly one attempt: no retry
+    assert s1.attempts[0].guard_status == "rejected"
+    assert s1.attempts[0].diagnosis and s1.attempts[0].diagnosis.category == "unsafe_query"
+    assert not s1.attempts[0].diagnosis.recoverable
+    assert "not attempted" in (s1.failure_explanation or "")
+    assert h.executor.executed == []  # nothing reached the database
+    assert h.provider.calls_for("recover_error") == []  # no model call spent on it
+    assert final["termination_reason"] == "all_steps_failed"
+    assert final["response"].status == "failed"

@@ -37,6 +37,8 @@ from sqlglot.optimizer.qualify import qualify
 from app.agent.state import GuardViolation
 
 MAX_SQL_CHARS = 20_000
+MAX_JOINS = 6  # SECURITY_DESIGN §4.6
+MAX_SUBQUERY_DEPTH = 4
 
 _FORBIDDEN_NODE_NAMES = (
     "Insert",
@@ -189,6 +191,29 @@ def _parse_single_select(sql: str) -> exp.Expression | GuardResult:
 
 def _statement_violations(root: exp.Expression) -> list[GuardViolation]:
     out = []
+    if any(w.args.get("recursive") for w in root.find_all(exp.With)):
+        out.append(
+            GuardViolation(
+                code="RECURSIVE_CTE",
+                message="Recursive CTEs are not allowed; compute per-row values with joins or window functions.",
+            )
+        )
+    joins = sum(1 for _ in root.find_all(exp.Join))
+    if joins > MAX_JOINS:
+        out.append(
+            GuardViolation(
+                code="TOO_MANY_JOINS",
+                message=f"The query joins {joins} times (limit {MAX_JOINS}); aggregate in steps instead.",
+            )
+        )
+    depth = _subquery_depth(root)
+    if depth > MAX_SUBQUERY_DEPTH:
+        out.append(
+            GuardViolation(
+                code="TOO_DEEP",
+                message=f"Subqueries are nested {depth} levels deep (limit {MAX_SUBQUERY_DEPTH}); flatten with CTEs.",
+            )
+        )
     forbidden = next((n for n in root.walk() if isinstance(n, FORBIDDEN_NODES)), None)
     if forbidden is not None:
         out.append(
@@ -204,6 +229,18 @@ def _statement_violations(root: exp.Expression) -> list[GuardViolation]:
             GuardViolation(code="LOCKING_CLAUSE", message="FOR UPDATE/SHARE is not allowed.")
         )
     return out
+
+
+def _subquery_depth(root: exp.Expression) -> int:
+    deepest = 0
+    for select in root.find_all(exp.Select):
+        level, node = 1, select.parent
+        while node is not None:
+            if isinstance(node, exp.Select):
+                level += 1
+            node = node.parent
+        deepest = max(deepest, level)
+    return deepest
 
 
 def _table_violations(

@@ -8,12 +8,32 @@ from __future__ import annotations
 
 from app.agent.state import ErrorCategory, ErrorDiagnosis, SQLAttempt
 
+# Guard rejections that mean the model tried something *unsafe* (writes, DDL, other
+# schemas, server functions, stacked statements). Per the Phase 6 policy these are
+# never retried: recovery is for honest mistakes, not for nudging unsafe SQL through.
+UNSAFE_GUARD_CODES = frozenset(
+    {
+        "NOT_A_SELECT",
+        "FORBIDDEN_STATEMENT",
+        "MULTIPLE_STATEMENTS",
+        "SELECT_INTO",
+        "LOCKING_CLAUSE",
+        "FORBIDDEN_SCHEMA",
+        "FORBIDDEN_FUNCTION",
+    }
+)
+
 GUARD_CODE_CATEGORY: dict[str, ErrorCategory] = {
     "SYNTAX_ERROR": "syntax_error",
+    "NON_LITERAL_LIMIT": "syntax_error",
     "UNKNOWN_TABLE": "unknown_table",
     "UNKNOWN_COLUMN": "unknown_column",
     "AMBIGUOUS_COLUMN": "ambiguous_column",
     "INVALID_REFERENCE": "unknown_column",
+    # Structural/DoS limits: honest mistakes a model can fix, so one retry is allowed.
+    "TOO_MANY_JOINS": "too_expensive",
+    "TOO_DEEP": "too_expensive",
+    **dict.fromkeys(UNSAFE_GUARD_CODES, "unsafe_query"),
 }
 
 SQLSTATE_CATEGORY: dict[str, ErrorCategory] = {
@@ -31,11 +51,23 @@ SQLSTATE_CATEGORY: dict[str, ErrorCategory] = {
     "42702": "ambiguous_column",
     "57014": "timeout",
     "42501": "permission_denied",
-    "25006": "guard_rejected",
+    # read_only_sql_transaction: the database's own defence fired. Something unsafe got
+    # past the Guard, which is a bug to investigate, never something to retry.
+    "25006": "unsafe_query",
+    # Not a SQLSTATE: produced by the executor's EXPLAIN cost gate before execution.
+    "COST_LIMIT": "too_expensive",
 }
 
 HINTS: dict[ErrorCategory, str] = {
     "guard_rejected": "Write a single read-only SELECT over this dataset's tables only.",
+    "unsafe_query": (
+        "The query tried to modify data, touch other schemas or call server functions. "
+        "Analysis queries are read-only SELECTs over this dataset only; this is not retried."
+    ),
+    "too_expensive": (
+        "The query plan is too expensive to run: aggregate before joining, filter earlier, "
+        "and avoid cross joins."
+    ),
     "syntax_error": "Fix the PostgreSQL syntax; keep the query as simple as possible.",
     "unknown_table": "Use only the tables listed in the schema context.",
     "unknown_column": "Use only columns listed for each table; join the table that holds the column.",
@@ -52,7 +84,7 @@ HINTS: dict[ErrorCategory, str] = {
     "other": "Rewrite the query more simply.",
 }
 
-NOT_RECOVERABLE: frozenset[ErrorCategory] = frozenset({"permission_denied"})
+NOT_RECOVERABLE: frozenset[ErrorCategory] = frozenset({"permission_denied", "unsafe_query"})
 
 
 def classify_attempt(attempt: SQLAttempt, *, repeated: bool = False) -> ErrorDiagnosis:

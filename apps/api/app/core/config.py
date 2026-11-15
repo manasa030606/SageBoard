@@ -99,6 +99,9 @@ class Settings(BaseSettings):
     # Size of the sample dataset each user can load from the Data page.
     demo_dataset_scale: Literal["small", "standard"] = "standard"
     executor_statement_timeout_ms: int = Field(default=10_000, ge=100, le=120_000)
+    # Refuse agent queries whose EXPLAIN plan cost exceeds this (PostgreSQL cost units,
+    # not time). Generous by design: the statement timeout is the hard stop. 0 = off.
+    executor_max_plan_cost: float = Field(default=5_000_000, ge=0)
 
     # --- Authentication ------------------------------------------------------
     # "session": real accounts (argon2id passwords, JWT access cookie + rotating refresh

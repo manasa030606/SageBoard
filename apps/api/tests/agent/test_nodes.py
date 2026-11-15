@@ -423,7 +423,7 @@ async def test_recovery_stops_on_unrecoverable_errors() -> None:
     )
     out = await run_node("recover_error", state, h.deps)
     s1 = out["step_results"]["s1"]
-    assert len(s1.attempts) == 1 and "can’t be fixed" in s1.failure_explanation
+    assert len(s1.attempts) == 1 and "not attempted" in s1.failure_explanation
     assert h.provider.calls == []
 
 

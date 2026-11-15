@@ -77,7 +77,7 @@ async def recover_error(state: AgentState, ctx: NodeContext) -> dict[str, Any]:
     }
     if not diagnosis.recoverable:
         result.failure_explanation = (
-            f"{diagnosis.summary} This can’t be fixed by rewriting the query."
+            f"{diagnosis.summary} Automatic correction is not attempted for this kind of error."
         )
         return put_step(state, result)
 

@@ -54,6 +54,19 @@ ADVERSARIAL: list[tuple[str, str]] = [
     ("SELECT * FROM orders LIMIT ALL", "NON_LITERAL_LIMIT"),
     ("SELECT * FROM orders LIMIT (SELECT 10)", "NON_LITERAL_LIMIT"),
     ("SELEC * FROM orders", "SYNTAX_ERROR"),
+    (
+        "WITH RECURSIVE t AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM t WHERE n < 10) SELECT * FROM t",
+        "RECURSIVE_CTE",
+    ),
+    (
+        "SELECT COUNT(*) FROM orders o0 "
+        + " ".join(f"JOIN orders o{i} ON o{i}.order_id = o{i - 1}.order_id" for i in range(1, 8)),
+        "TOO_MANY_JOINS",
+    ),
+    (
+        "SELECT * FROM (SELECT * FROM (SELECT * FROM (SELECT * FROM (SELECT order_id FROM orders) a) b) c) d",
+        "TOO_DEEP",
+    ),
     ("x" * 20_001, "TOO_LONG"),
 ]
 
@@ -71,6 +84,7 @@ def test_adversarial_queries_are_rejected(sql: str, code: str) -> None:
 
 BENIGN = [
     "SELECT COUNT(*) AS orders FROM orders",
+    "SELECT COUNT(*) AS orders FROM orders;",  # a bare trailing semicolon is tolerated
     "SELECT status, COUNT(*) AS n FROM orders GROUP BY status ORDER BY n DESC",
     f"SELECT COUNT(*) FROM {SCHEMA}.orders",
     "SELECT DATE_TRUNC('month', order_date) AS month, COUNT(*) FROM orders GROUP BY 1 ORDER BY 1",
@@ -88,6 +102,9 @@ BENIGN = [
     "SELECT CASE WHEN quantity > 3 THEN 'bulk' ELSE 'single' END AS kind, COUNT(*) FROM order_items GROUP BY 1",
     "SELECT order_id FROM orders ORDER BY order_date DESC LIMIT 10 OFFSET 5",
     "SELECT * FROM (SELECT status, COUNT(*) n FROM orders GROUP BY status) s WHERE n > 10",
+    "SELECT * FROM (SELECT * FROM (SELECT order_id FROM orders) a) b",  # depth 3 ≤ 4
+    "SELECT COUNT(*) FROM orders o JOIN order_items oi ON oi.order_id = o.order_id "
+    "JOIN products p ON p.product_id = oi.product_id JOIN customers c ON c.customer_id = o.customer_id",
     "SELECT COALESCE(SUM(quantity), 0) FROM order_items WHERE order_id IN (SELECT order_id FROM orders WHERE channel = 'web')",
 ]
 

@@ -135,6 +135,8 @@ class AgentRunner:
                 reader_role=catalog.reader_role,
                 max_rows=self.settings.agent_max_result_rows,
                 timeout_ms=self.settings.executor_statement_timeout_ms,
+                max_plan_cost=self.settings.executor_max_plan_cost,
+                cancel_event=cancel_event,
             ),
             max_rows=self.settings.agent_max_result_rows,
             cancel_event=cancel_event,
