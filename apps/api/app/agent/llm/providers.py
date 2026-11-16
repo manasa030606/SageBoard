@@ -447,7 +447,7 @@ class OpenAICompatibleProvider(_HTTPProvider):
         except LLMError as exc:
             if exc.code != "LLM_BAD_REQUEST" or self.structured_mode != "json_schema":
                 raise
-            log.warning("llm.schema_rejected_fallback", provider=self.name, error=str(exc)[:200])
+            log.warning("llm.schema_rejected_fallback", provider=self.name, code=exc.code)
             self.structured_mode = "json_object"
             data = await self._post(
                 "/chat/completions",

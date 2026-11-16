@@ -4,11 +4,14 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { AnalyticsIllustration } from "@/components/brand/analytics-illustration";
+import { HomeLink } from "@/components/brand/home-link";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/field";
+import { Field, Input, PasswordInput } from "@/components/ui/field";
 import { Notice } from "@/components/ui/states";
 import { hardNavigate } from "@/features/auth/session";
+import { SignedInNotice } from "@/features/auth/signed-in-notice";
 import { auth } from "@/lib/api/endpoints";
 import { ApiError } from "@/lib/api/errors";
 
@@ -65,16 +68,23 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
   return (
     <div className="grid min-h-dvh lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
-      <aside className="relative hidden flex-col justify-between bg-navy px-12 py-12 text-warm lg:flex">
-        <Link href="/" aria-label="Sageboard home" className="w-fit rounded-sm">
+      <aside className="relative hidden min-w-0 flex-col bg-navy px-10 py-10 text-warm lg:flex lg:h-dvh lg:min-h-[600px] xl:px-12 xl:py-12 [@media(max-height:760px)]:py-8">
+        <HomeLink className="w-fit rounded-sm">
           <Logo inverted />
-        </Link>
-        <div className="max-w-md">
-          <p className="eyebrow text-sage">Sageboard</p>
-          <p className="mt-4 text-display text-[40px] leading-[1.1] text-warm">
-            Your data. Your questions. Clear decisions.
-          </p>
-          <ul className="mt-10 grid gap-4 text-[14px] leading-6 text-warm/80">
+        </HomeLink>
+        {/* The illustration takes whatever height the text leaves, so it is shown on every
+            laptop screen and only gets smaller on short ones. */}
+        <div className="flex min-h-0 flex-1 flex-col justify-center py-6 [@media(max-height:760px)]:py-3">
+          <div className="max-w-md">
+            <p className="eyebrow text-sage">Sageboard</p>
+            <p className="mt-4 text-display text-[34px] leading-[1.1] text-warm xl:text-[40px] [@media(max-height:760px)]:mt-2 [@media(max-height:760px)]:text-[32px]">
+              Your data. Your questions. Clear decisions.
+            </p>
+          </div>
+          <div className="relative my-6 min-h-[170px] w-full max-w-[520px] flex-1 [@media(max-height:760px)]:my-3">
+            <AnalyticsIllustration className="absolute inset-0" />
+          </div>
+          <ul className="grid max-w-md gap-3 text-[14px] leading-6 text-warm/80 [@media(max-height:760px)]:gap-2">
             <li className="border-l-2 border-sage/60 pl-4">
               Every dataset lives in its own isolated schema that only you can query.
             </li>
@@ -93,13 +103,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
       <main className="flex items-center justify-center bg-warm px-5 py-12">
         <div className="w-full max-w-[380px]">
-          <Link
-            href="/"
-            aria-label="Sageboard home"
-            className="mb-10 block w-fit rounded-sm lg:hidden"
-          >
+          <HomeLink className="mb-10 block w-fit rounded-sm lg:hidden">
             <Logo />
-          </Link>
+          </HomeLink>
           <h1 className="text-title text-[28px] text-ink">
             {isRegister ? "Create your account" : "Sign in"}
           </h1>
@@ -126,6 +132,8 @@ export function AuthForm({ mode }: { mode: Mode }) {
               </>
             )}
           </p>
+
+          <SignedInNotice />
 
           <form className="mt-8 grid gap-4" onSubmit={submit} noValidate>
             {formLevelError ? (
@@ -182,9 +190,8 @@ export function AuthForm({ mode }: { mode: Mode }) {
               }
             >
               {({ id, describedBy, invalid }) => (
-                <Input
+                <PasswordInput
                   id={id}
-                  type="password"
                   autoComplete={isRegister ? "new-password" : "current-password"}
                   required
                   maxLength={128}

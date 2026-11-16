@@ -178,7 +178,7 @@ def _contain(
 ) -> tuple[dict[str, Any], NodeStatus, str]:
     """Turn an exception into a degraded (fallback) or failed (critical) node result."""
     error = f"{type(exc).__name__}: {_short(str(exc))}"
-    log.warning("agent.node_failed", node=name, error=error)
+    log.warning("agent.node_failed", node=name, error_type=type(exc).__name__)
     if fallback is not None:
         update = fallback(state, exc, ctx)
         status: NodeStatus = "degraded"
@@ -253,7 +253,7 @@ def traced_node(
             try:
                 await deps.on_event(event)
             except Exception as exc:  # observability must never break the run
-                log.warning("agent.on_event_failed", node=name, error=str(exc))
+                log.warning("agent.on_event_failed", node=name, error_type=type(exc).__name__)
         return update
 
     node.__name__ = name

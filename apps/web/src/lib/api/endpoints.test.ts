@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { conversations, reports } from "./endpoints";
+import { auth, conversations, reports } from "./endpoints";
 
 function stubFetch(status: number, body: unknown) {
   const impl = vi.fn<typeof fetch>(async (_url, init) => {
@@ -45,5 +45,30 @@ describe("create endpoints use POST", () => {
     await conversations.ask("c1", "How many orders?");
     expect(fetchImpl.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "POST"]);
     expect(String(fetchImpl.mock.calls[1]![0])).toMatch(/\/conversations\/c1\/sessions$/);
+  });
+});
+
+describe("auth.peek", () => {
+  it("makes one read-only call to /auth/me and returns the session", async () => {
+    const fetchImpl = stubFetch(200, {
+      user: { id: "u1" },
+      csrf_token: "t",
+      auth_mode: "session",
+    });
+    const info = await auth.peek();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/auth\/me$/);
+    expect(init?.method).toBe("GET");
+    expect(info.user.id).toBe("u1");
+  });
+
+  it("fails on 401 without trying the refresh cookie (which would rotate the user's tokens)", async () => {
+    const fetchImpl = stubFetch(401, { error: { code: "UNAUTHENTICATED", message: "no" } });
+    await expect(auth.peek()).rejects.toMatchObject({ status: 401 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls.map((c) => String(c[0])).some((u) => u.includes("refresh"))).toBe(
+      false,
+    );
   });
 });

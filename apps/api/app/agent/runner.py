@@ -280,6 +280,22 @@ class AgentRunner:
                 .values(updated_at=datetime.now(UTC))
             )
             await db.commit()
+            # Counts and timings only: no question, SQL or result values.
+            log.info(
+                "agent.run_finished",
+                session_id=str(run.id),
+                status=run.status,
+                termination=run.termination_reason,
+                error_code=run.error_code,
+                duration_ms=run.duration_ms,
+                llm_calls=run.llm_calls,
+                sql_executions=run.sql_executions,
+                tokens_in=run.tokens_in,
+                tokens_out=run.tokens_out,
+                nodes_not_succeeded=[
+                    e.node for e in final.get("trace", []) if e.status != "succeeded"
+                ],
+            )
 
     async def _mark_crashed(self, session_id: uuid.UUID, started: float) -> None:
         try:
@@ -403,12 +419,17 @@ class RunManager:
         self.llm = llm
         self._slots = asyncio.Semaphore(max_concurrent)
         self._runs: dict[uuid.UUID, tuple[asyncio.Task[None], asyncio.Event]] = {}
+        self._owners: dict[uuid.UUID, uuid.UUID] = {}  # session id -> owner id
 
     @property
     def available(self) -> bool:
         return self.llm is not None
 
-    def start(self, session_id: uuid.UUID, databases: Databases) -> None:
+    def active_for(self, owner_id: uuid.UUID) -> int:
+        """Runs of this user that are queued for a slot or running."""
+        return sum(1 for o in self._owners.values() if o == owner_id)
+
+    def start(self, session_id: uuid.UUID, databases: Databases, owner_id: uuid.UUID) -> None:
         if self.llm is None:
             raise RuntimeError("no LLM configured")
         runner = AgentRunner(databases=databases, settings=self.settings, llm=self.llm)
@@ -420,7 +441,13 @@ class RunManager:
 
         task = asyncio.create_task(guarded(), name=f"agent-run-{session_id}")
         self._runs[session_id] = (task, cancel)
-        task.add_done_callback(lambda _: self._runs.pop(session_id, None))
+        self._owners[session_id] = owner_id
+
+        def forget(_: object) -> None:
+            self._runs.pop(session_id, None)
+            self._owners.pop(session_id, None)
+
+        task.add_done_callback(forget)
 
     def cancel(self, session_id: uuid.UUID) -> bool:
         entry = self._runs.get(session_id)

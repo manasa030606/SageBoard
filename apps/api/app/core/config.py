@@ -122,6 +122,8 @@ class Settings(BaseSettings):
     registrations_per_hour: int = Field(default=10, ge=1, le=10_000)
     uploads_per_hour: int = Field(default=20, ge=1, le=10_000)
     analyses_per_hour: int = Field(default=30, ge=1, le=10_000)  # each run spends LLM tokens
+    # Runs one user may have queued or running at once, so nobody can fill the shared slots.
+    analyses_concurrent_per_user: int = Field(default=2, ge=1, le=20)
 
     # --- LLM ---------------------------------------------------------------------
     llm_provider: LLMProvider = LLMProvider.MOCK

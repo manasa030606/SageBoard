@@ -22,6 +22,7 @@ import { ErrorState } from "@/components/ui/states";
 import { ToastProvider } from "@/components/ui/toast";
 import { initials, SessionProvider, useSession } from "@/features/auth/session";
 import { cn } from "@/lib/cn";
+import { DASHBOARD_HREF } from "@/lib/routes";
 
 interface NavItem {
   href: string;
@@ -30,7 +31,7 @@ interface NavItem {
 }
 
 const PRIMARY: NavItem[] = [
-  { href: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: DASHBOARD_HREF, label: "Dashboard", icon: LayoutDashboard },
   { href: "/app/analyst", label: "Analyst", icon: MessageSquareText },
   { href: "/app/data", label: "Data sources", icon: Database },
   { href: "/app/history", label: "History", icon: History },
@@ -66,7 +67,7 @@ function NavList({
   onNavigate?: () => void;
 }) {
   return (
-    <ul className="grid gap-0.5">
+    <ul className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
       {items.map(({ href, label, icon: Icon }) => {
         const active = pathname !== null && (pathname === href || pathname.startsWith(`${href}/`));
         return (
@@ -76,7 +77,7 @@ function NavList({
               onClick={onNavigate}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "group flex h-8 items-center gap-2.5 rounded-sm px-2.5 text-[13.5px] transition-colors duration-150",
+                "group flex h-8 min-w-0 items-center gap-2.5 rounded-sm px-2.5 text-[13.5px] transition-colors duration-150",
                 active
                   ? "bg-paper font-medium text-ink shadow-[0_0_0_1px_var(--color-line)]"
                   : "text-ink-2 hover:bg-warm-300/60 hover:text-ink",
@@ -90,7 +91,7 @@ function NavList({
                 aria-hidden
                 strokeWidth={1.75}
               />
-              {label}
+              <span className="truncate">{label}</span>
             </Link>
           </li>
         );
@@ -101,15 +102,20 @@ function NavList({
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0 flex-col">
       <div className="flex h-14 items-center px-4">
-        <Link href="/" className="rounded-sm" onClick={onNavigate} aria-label="Sageboard home">
+        <Link
+          href={DASHBOARD_HREF}
+          className="rounded-sm"
+          onClick={onNavigate}
+          aria-label="Sageboard dashboard"
+        >
           <Logo />
         </Link>
       </div>
-      <nav aria-label="Main" className="flex flex-1 flex-col gap-6 px-2.5 pt-2">
+      <nav aria-label="Main" className="flex min-w-0 flex-1 flex-col gap-6 px-2.5 pt-2">
         <NavLinks items={PRIMARY} onNavigate={onNavigate} />
-        <div className="mt-auto grid gap-3 pb-3">
+        <div className="mt-auto grid grid-cols-[minmax(0,1fr)] gap-3 pb-3">
           <NavLinks items={SECONDARY} onNavigate={onNavigate} />
           <UserMenu />
         </div>
@@ -130,8 +136,13 @@ function UserMenu() {
         {initials(user.full_name)}
       </span>
       <div className="min-w-0 flex-1 leading-tight">
-        <p className="truncate text-[13px] font-medium text-ink">{user.full_name}</p>
-        <p className="truncate text-2xs text-ink-2">
+        <p className="truncate text-[13px] font-medium text-ink" title={user.full_name}>
+          {user.full_name}
+        </p>
+        <p
+          className="truncate text-2xs text-ink-2"
+          title={authMode === "demo" ? undefined : user.email}
+        >
           {authMode === "demo" ? "Local demo user" : user.email}
         </p>
       </div>
@@ -216,7 +227,7 @@ function AppFrame({ children }: { children: ReactNode }) {
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-line bg-warm/95 px-4 backdrop-blur-sm lg:hidden">
-            <Link href="/app/dashboard" aria-label="Sageboard dashboard">
+            <Link href={DASHBOARD_HREF} aria-label="Sageboard dashboard">
               <Logo />
             </Link>
             <button

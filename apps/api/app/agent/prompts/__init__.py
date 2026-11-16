@@ -23,6 +23,10 @@ class Prompt:
     system: str
 
 
+# Any spelling of a data tag (case, spaces, slash) is neutralised, not just "</data>".
+_DATA_TAG = re.compile(r"<\s*/?\s*data\b", re.IGNORECASE)
+
+
 @cache
 def load_prompt(name: str) -> Prompt:
     files = resources.files(__package__)
@@ -42,7 +46,7 @@ def load_prompt(name: str) -> Prompt:
 def data_block(name: str, value: Any) -> str:
     """Wrap dataset-derived content so the model treats it as data, not instructions."""
     body = value if isinstance(value, str) else json.dumps(value, default=str, ensure_ascii=False)
-    body = body.replace("</data>", "<\\/data>")
+    body = _DATA_TAG.sub(lambda m: "<\\" + m.group(0)[1:], body)
     return f'<data name="{name}">\n{body}\n</data>'
 
 

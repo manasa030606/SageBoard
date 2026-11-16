@@ -8,6 +8,7 @@ engine lifecycle and the versioned routers. Run locally with::
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -22,11 +23,22 @@ from app.auth.ratelimit import RateLimiter
 from app.core.config import Settings, get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging, get_logger
-from app.core.middleware import REQUEST_ID_HEADER, RequestContextMiddleware
+from app.core.middleware import (
+    REQUEST_ID_HEADER,
+    BodyLimitMiddleware,
+    RequestContextMiddleware,
+    SecurityHeadersMiddleware,
+)
 from app.db.engines import Databases, open_databases
 from app.ingestion.uploads import sweep_stale
 
 log = get_logger(__name__)
+
+# CPU-heavy work (CSV analysis and loading) runs in worker threads. With Python's default 5 ms
+# switch interval such a thread can keep the GIL long enough to stall every other request for
+# seconds (measured: a 20 MB CSV delayed /healthz by 2.3 s). A shorter interval hands the GIL
+# back to the event loop promptly at no measurable cost to the worker.
+GIL_SWITCH_INTERVAL_S = 0.0002
 
 
 _FROM_SETTINGS = object()
@@ -43,6 +55,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        sys.setswitchinterval(GIL_SWITCH_INTERVAL_S)
         databases = await open_databases(settings)
         app.state.databases = databases
         removed = sweep_stale(settings.upload_dir, settings.upload_ttl_minutes * 60)
@@ -76,8 +89,8 @@ def create_app(
         title="Sageboard API",
         version=settings.app_version,
         lifespan=lifespan,
-        openapi_url=f"{settings.api_prefix}/openapi.json",
-        # Interactive docs only outside production.
+        # The API description and interactive docs are not published in production.
+        openapi_url=None if settings.is_production else f"{settings.api_prefix}/openapi.json",
         docs_url=None if settings.is_production else f"{settings.api_prefix}/docs",
         redoc_url=None,
     )
@@ -89,6 +102,12 @@ def create_app(
 
     # Middleware order: the last added runs first. CORS must wrap everything so that
     # error responses also carry CORS headers.
+    app.add_middleware(
+        BodyLimitMiddleware,
+        upload_path=f"{settings.api_prefix}/datasets/uploads",
+        upload_max_bytes=settings.upload_max_bytes,
+    )
+    app.add_middleware(SecurityHeadersMiddleware, hsts=settings.is_production)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
         CORSMiddleware,

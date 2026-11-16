@@ -64,6 +64,8 @@ def build() -> Any:
         demo_dataset_scale="small",
         cors_origins=[WEB_ORIGIN],
         analyses_per_hour=10_000,
+        # Load tests sign up many users from one address; the default would answer 429.
+        registrations_per_hour=int(os.environ.get("E2E_REGISTRATIONS_PER_HOUR", "10")),
     )
     return create_app(settings, agent_llm=StructuredLLM(QuestionRoutedOracle()))
 

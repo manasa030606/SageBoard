@@ -67,7 +67,9 @@ Setup for the integration and browser tests, and the evaluation framework, are i
 |---|---|
 | [Architecture](docs/architecture/ARCHITECTURE.md) | Components, data flow, database, API, the analysis agent |
 | [Security](docs/security/SECURITY.md) | Threat model, SQL validation, database roles, application security |
-| [Development](docs/development/DEVELOPMENT.md) | Setup, configuration, testing, known limitations, status |
+| [Security review](docs/security/SECURITY_REVIEW.md) | Phase 10 audit: findings by severity, fixes, remaining risks |
+| [Development](docs/development/DEVELOPMENT.md) | Setup, configuration, testing, known limitations, deployment checklist, status |
+| [Performance report](docs/development/PERFORMANCE_REPORT.md) | Phase 10 measurements before and after, limits, what was not measured |
 | [Decisions](docs/development/DECISIONS.md) | Decision log and architecture decision records |
 | [Evaluation](docs/eval/README.md) | Evaluation framework, results, failure analysis |
 | [Original PRD](docs/archive/PRD.md) | Archived product brief |

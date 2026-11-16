@@ -179,3 +179,195 @@
     background: #fff;
   }
 }
+
+/* Sign-in illustration (components/brand/analytics-illustration.tsx) -------
+ * The shapes are drawn in their finished state. Motion is only added for people who haven't
+ * asked for reduced motion, and only animates transform, opacity and stroke offsets, which
+ * are cheap to paint. */
+.sb-illo .sb-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  fill: var(--color-warm);
+  fill-opacity: 0.55;
+}
+.sb-illo .sb-bar,
+.sb-illo .sb-glow,
+.sb-illo .sb-ring,
+.sb-illo .sb-spin,
+.sb-illo .sb-spark,
+.sb-illo .sb-scan {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.sb-illo .sb-bar {
+  transform-origin: 50% 100%;
+}
+.sb-illo .sb-scan {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sb-illo .sb-bar {
+    animation: sb-grow 7s var(--ease-quiet) infinite;
+  }
+  .sb-illo .sb-line {
+    stroke-dasharray: 1;
+    animation: sb-draw 7s ease-in-out infinite;
+  }
+  .sb-illo .sb-area {
+    animation: sb-area 7s ease-in-out infinite;
+  }
+  .sb-illo .sb-dot {
+    animation: sb-dot 7s ease-in-out infinite;
+  }
+  .sb-illo .sb-flow {
+    animation: sb-flow 1.6s linear infinite;
+  }
+  .sb-illo .sb-float {
+    animation: sb-float 7s ease-in-out infinite;
+  }
+  .sb-illo .sb-spin {
+    animation: sb-spin 28s linear infinite;
+  }
+  .sb-illo .sb-ring {
+    animation: sb-ring 3.6s ease-in-out infinite;
+  }
+  .sb-illo .sb-glow {
+    animation: sb-glow 3.6s ease-in-out infinite;
+  }
+  .sb-illo .sb-spark {
+    animation: sb-spark 3.6s ease-in-out infinite;
+  }
+  .sb-illo .sb-row {
+    animation: sb-row 4.2s ease-in-out infinite;
+  }
+  .sb-illo .sb-scan {
+    animation: sb-scan 4.2s ease-in-out infinite;
+  }
+}
+
+@keyframes sb-grow {
+  0% {
+    transform: scaleY(0);
+  }
+  22%,
+  86% {
+    transform: scaleY(1);
+  }
+  100% {
+    transform: scaleY(0);
+  }
+}
+@keyframes sb-draw {
+  0% {
+    stroke-dashoffset: 1;
+  }
+  35%,
+  86% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: 1;
+  }
+}
+@keyframes sb-area {
+  0%,
+  20% {
+    opacity: 0;
+  }
+  38%,
+  86% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes sb-dot {
+  0%,
+  33% {
+    opacity: 0;
+  }
+  40%,
+  86% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes sb-flow {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+@keyframes sb-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-7px);
+  }
+}
+@keyframes sb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes sb-ring {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.14);
+    opacity: 0.25;
+  }
+}
+@keyframes sb-glow {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes sb-spark {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.18);
+  }
+}
+@keyframes sb-row {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes sb-scan {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  12% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+    transform: translateY(88px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(88px);
+  }
+}

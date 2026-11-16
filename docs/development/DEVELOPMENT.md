@@ -67,6 +67,7 @@ The web app holds no secrets. Its single variable, `NEXT_PUBLIC_API_URL` (defaul
 | `ACCESS_TOKEN_MINUTES`, `REFRESH_TOKEN_DAYS` | `15`, `14` | Session lifetimes |
 | `COOKIE_SAMESITE`, `COOKIE_SECURE`, `COOKIE_DOMAIN` | `lax`, auto, unset | Secure is automatic in production; cross-site deployments need `none` |
 | `LOGIN_ATTEMPTS_PER_MINUTE`, `REGISTRATIONS_PER_HOUR`, `UPLOADS_PER_HOUR` | `5`, `10`, `20` | In-process rate limits |
+| `ANALYSES_CONCURRENT_PER_USER` | `2` | Analyses one user may have queued or running; a further request gets `429 RATE_LIMITED` with `Retry-After`. In-process, like the other limits |
 | `DEMO_DATASET_SCALE`, `DEMO_USER_EMAIL` | `standard`, `demo@sageboard.local` | Sample dataset size; demo-mode user |
 | `LLM_PROVIDER` | `mock` | `google` (Gemini, free tier via AI Studio; `gemini` also accepted), `anthropic`, `openai` or `mock`. **`mock` = no model**: questions stay queued (nothing is invented); refused in production |
 | `LLM_MODEL` + one of `GOOGLE_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | unset | Required for a real provider, e.g. `gemini-3.8-flash`. `GEMINI_API_KEY` is accepted as an alias of `GOOGLE_API_KEY` |
@@ -199,7 +200,10 @@ Product and agent:
 Security gaps (also listed in [SECURITY.md](../security/SECURITY.md)):
 - Result values in stored history can contain real emails visible to the dataset owner.
 - A sensitive column that is aliased in a query can reach the model (redaction works on result column names).
-- No Content Security Policy or other security headers yet; no `pip-audit` / `pnpm audit` in CI.
+- The web app sends a partial Content Security Policy (framing, base URI, form targets, objects) but no `script-src`, because Next.js inline scripts would need per-request nonces. `pip-audit` and `pnpm audit` were run for Phase 10 (clean) but are not in CI.
+- Logging out does not invalidate the access token it was issued; it stays valid for up to 15 minutes (`ACCESS_TOKEN_MINUTES`). Refresh tokens are revoked at once.
+- Registration reveals whether an email is already taken (`409 EMAIL_TAKEN`).
+- The default `ENV` is `development`. A deployment that forgets to set `ENV=production` silently keeps API docs, the HSTS-less headers and dev defaults; see the deployment checklist below.
 - Cross-site cookies (`COOKIE_SAMESITE=none`) are implemented but only tested on the same site. Neon is not verified.
 
 Code and tooling:
@@ -212,4 +216,15 @@ Code and tooling:
 
 Delivered: the full application (accounts, dataset upload and sample data, the LangGraph analysis agent with SQL Guard and self-correction, result analysis and charts, grounded insights, conversation memory, history, reports with PDF export, dashboard) plus the evaluation framework and browser tests.
 
-Not started (original roadmap): production hardening (security headers, audit checks, accessibility and visual regression tests, retention job), deployment (container image, hosting, production database runbook, smoke tests) and the demo script. External PostgreSQL connectors, team workspaces, a job queue and multi-dataset conversations are post-MVP ideas. No phase starts without the project owner's explicit approval.
+Phase 10 (production hardening) is done: see [SECURITY_REVIEW.md](../security/SECURITY_REVIEW.md) and [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md). Not started (original roadmap): accessibility and visual regression tests, retention job, deployment (container image, hosting, production database runbook, smoke tests) and the demo script. External PostgreSQL connectors, team workspaces, a job queue and multi-dataset conversations are post-MVP ideas. No phase starts without the project owner's explicit approval.
+
+## 9. Deployment checklist (from the Phase 10 review)
+
+These are not automated. Check them before the first deployment:
+1. Set `ENV=production`. Startup then refuses `AUTH_MODE=demo`, `LLM_PROVIDER=mock`, an insecure cookie setup and a short `JWT_SECRET`, and the API hides `/docs`, `/redoc` and `/openapi.json`.
+2. Run **one** API process. Run slots, the per-user analysis cap and all rate limits are in memory (ADR-0004).
+3. Behind a reverse proxy, start uvicorn with `--proxy-headers` and `--forwarded-allow-ips` set to the proxy address. Otherwise every client shares the proxy's IP in the login and registration limits.
+4. Set `CORS_ORIGINS` to the exact web origin, and `COOKIE_SAMESITE=none` only if the web app and API are on different sites.
+5. Serve over HTTPS so the production HSTS header takes effect.
+6. Keep the three database roles and passwords separate (ADR-0002), and confirm `readonly` cannot connect with the app role's password.
+7. Set a real provider key and a daily request limit that matches the plan.

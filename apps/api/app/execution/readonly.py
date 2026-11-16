@@ -66,7 +66,9 @@ async def run_readonly(
         # Fixed so dates, EXTRACT and to_char do not depend on the server or role default.
         await conn.execute("SET LOCAL TIME ZONE 'UTC'")
         stmt = await conn.prepare(sql)
-        records = await stmt.fetch(*params)
+        # One row past the cap detects truncation; the rest is never pulled into memory, even
+        # if a statement without a LIMIT ever reached this point.
+        records = await (await stmt.cursor(*params)).fetch(max_rows + 1)
         attributes = stmt.get_attributes()
         columns = [a.name for a in attributes]
         types = [a.type.name for a in attributes]

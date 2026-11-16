@@ -24,7 +24,8 @@ from app.api.deps import (
     csrf_protect,
 )
 from app.api.pagination import DEFAULT_LIMIT, CursorQuery, LimitQuery
-from app.core.errors import DailyModelLimitError
+from app.core.errors import DailyModelLimitError, RateLimitedError
+from app.core.logging import get_logger
 from app.schemas.analysis import (
     ConversationCreate,
     ConversationDetail,
@@ -41,6 +42,7 @@ from app.schemas.common import Page
 from app.schemas.errors import ErrorResponse
 from app.services.analysis import AGENT_PENDING_MESSAGE, AGENT_STARTED_MESSAGE
 
+log = get_logger(__name__)
 router = APIRouter(tags=["conversations"], dependencies=[Depends(csrf_protect)])
 ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (401, 403, 404, 409, 422, 503)
@@ -152,10 +154,15 @@ async def create_session(
     limit = settings.llm_daily_request_limit
     if manager.available and limit and await service.model_calls_today() >= limit:
         raise DailyModelLimitError(seconds_until_reset())
+    if manager.available and manager.active_for(user.id) >= settings.analyses_concurrent_per_user:
+        log.warning("rate_limited", limit="concurrent_analyses", user_id=str(user.id))
+        raise RateLimitedError(
+            5, "You already have analyses running. Wait for one to finish, then ask again."
+        )
     run = await service.create_session(user, conversation_id, body.question)
     started = manager.available and databases.executor is not None
     if started:
-        manager.start(run.id, databases)
+        manager.start(run.id, databases, user.id)
     return SessionAccepted(
         session=SessionSummary.model_validate(run),
         agent_available=started,

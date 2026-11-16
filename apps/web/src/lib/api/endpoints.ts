@@ -53,6 +53,15 @@ export const auth = {
       return res.data;
     }
   },
+  /**
+   * Read-only "is there a live session right now?" for pages that only want to know.
+   * Unlike `me`, it never tries the refresh cookie (that would rotate the user's tokens just
+   * to decide where a link goes) and leaves the CSRF token alone.
+   */
+  peek: async (): Promise<SessionInfo> => {
+    const res = await apiRequest<SessionInfo>("/auth/me", { retryOnAuth: false });
+    return res.data;
+  },
   login: (email: string, password: string) => session("/auth/login", { email, password }),
   register: (email: string, password: string, full_name: string) =>
     session("/auth/register", { email, password, full_name }),

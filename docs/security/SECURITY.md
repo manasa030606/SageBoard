@@ -254,7 +254,7 @@ Fallback if per-dataset roles cannot be administered on the chosen plan: one `sa
 | Control | Detail |
 |---|---|
 | Output as untrusted input | All outputs validated by Pydantic schemas; SQL by the Guard; chart specs by the spec validator; insights by the verifier. |
-| Prompt-injection containment | Dataset-derived strings (names, descriptions, sample values) are wrapped in `<data>` blocks, escaped, and truncated (descriptions ≤ 300 chars, values ≤ 80 chars). The system prompt says data blocks never contain instructions. Containment doesn't depend on the model obeying, because no LLM output can do more than a validated SELECT on the user's own data. |
+| Prompt-injection containment | Dataset-derived strings (names, descriptions, sample values) are wrapped in `<data>` blocks and truncated; any `<data` or `</data` tag inside the content is neutralised whatever its case or spacing, so content cannot close the block early (descriptions ≤ 300 chars, values ≤ 80 chars). The system prompt says data blocks never contain instructions. Containment doesn't depend on the model obeying, because no LLM output can do more than a validated SELECT on the user's own data. |
 | Data minimisation | The LLM sees schema, profiles, ≤ 50-row previews and computed facts. Columns flagged `is_sensitive` never have sample values or preview cells sent; they're masked as `«redacted»`. the schema tools always hid sample values, but result rows were not masked until the evaluation (case X02) found customer emails in model prompts; masking now covers all five model-bound payloads. Limits: matched by result column name (an aliased column escapes); stored results shown to the owner are not masked. |
 | No secrets in prompts | Prompts are assembled from an allowlisted context builder; settings/env are never interpolated. |
 | Provider settings | Use providers' zero-data-retention or no-training options where available; document the provider's data policy in the README (D1). |
@@ -269,7 +269,9 @@ Fallback if per-dataset roles cannot be administered on the chosen plan: one `sa
   - Sign-out revokes the family.
 - **Cookies:** `sb_session` and `sb_refresh` are HttpOnly; `sb_refresh` is only ever sent to `/api/v1/auth`. `SameSite=Lax` by default; `Secure` is automatic in production. `COOKIE_SAMESITE=none` requires Secure, and startup refuses it otherwise. In production, startup also refuses `COOKIE_SECURE=false` and `AUTH_MODE=demo`.
 - **CSRF:** double-submit. The `sb_csrf` cookie must equal the `X-CSRF-Token` header on every POST/PUT/PATCH/DELETE, compared in constant time. The token is also returned in the response body, so cross-site frontends never need to read another site's cookie. Register, login and refresh are exempt (see ARCHITECTURE.md, API conventions).
-- **Rate limits:** per-process sliding windows for login (per IP + email and per IP), registration (per IP) and uploads (per user). Over the limit returns 429 with `Retry-After`.
+- **Rate limits:** per-process sliding windows for login (per IP + email and per IP), registration (per IP) and uploads (per user), plus a per-user cap on analyses running at once (`ANALYSES_CONCURRENT_PER_USER`, default 2). Over the limit returns 429 with `Retry-After`. Each refusal is logged as `rate_limited` with only the limit kind.
+- **Request size and headers:** a body-size middleware refuses JSON bodies over 1 MiB and uploads over the upload limit plus 1 MiB of multipart overhead, by declared length and by counting streamed bytes (`413 REQUEST_TOO_LARGE`). Every API response carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and `Cache-Control: no-store`, plus HSTS in production. The web app adds a Permissions-Policy and a partial CSP (see below).
+- **API docs:** `/docs`, `/redoc` and `/openapi.json` are disabled when `ENV=production`.
 - **Authorisation:**
   - Every service method takes the signed-in user, and every query filters by `owner_id`, so another user's resource is a 404, never a 403.
   - `tests/integration/test_ownership.py` walks every route with an id in its path, using a second user. It fails if a new route can't be checked.
@@ -277,12 +279,12 @@ Fallback if per-dataset roles cannot be administered on the chosen plan: one `sa
   - Each user gets their own copy of the sample dataset in their own schema.
 - **Audit log** (`app.audit_log`): register, login, failed login, logout, refresh-token reuse, dataset create and delete.
 - **Input validation:** Pydantic models reject unknown fields (`extra="forbid"`) and enforce lengths. UUIDs are typed. Enum filters are validated. Cursors are opaque and validated.
-- **Error hygiene:** connection-level database failures return `503 DATABASE_UNAVAILABLE` with no driver text, host, user or SQL (tested). Unexpected errors return a generic 500, with details only in the log under the request id.
+- **Error hygiene:** SQLAlchemy is configured with `hide_parameters=True`, so a database error never carries bound values such as an email or password hash. Logs record only an error type or code for node, event-handler and provider failures, never exception text. Connection-level database failures return `503 DATABASE_UNAVAILABLE` with no driver text, host, user or SQL (tested). Unexpected errors return a generic 500, with details only in the log under the request id.
 - **CORS:** explicit origin allowlist with credentials. The allowed headers include `X-CSRF-Token`; `Retry-After` is exposed. Other origins get no CORS headers (tested).
 - **Frontend:** all data is fetched client-side with `credentials: "include"`. The app area waits for `/auth/me` before rendering. A session change (sign-in, sign-out or expiry) triggers a full page load, so no client-side state from the previous session survives. After sign-in the app only redirects to same-app paths (`/app…`), never another site.
 
 **Not yet implemented:**
-- Content Security Policy and other security headers.
+- A full Content Security Policy. The web app sends `frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'`, but no `script-src`: Next.js inline scripts need per-request nonces, which was not worth the risk of breaking the app.
 - Password change and account deletion (deletion must also drop the user's warehouse schemas).
 - Email verification and password reset.
 - Rate limits shared across instances.
@@ -321,9 +323,9 @@ Fallback if per-dataset roles cannot be administered on the chosen plan: one `sa
 
 ## Release gate
 
-Criteria to meet before a public deployment. Criterion 5 (CSP) and the `pip-audit` / `pnpm audit` checks are not yet automated.
+Criteria to meet before a public deployment. Criterion 5 and the `pip-audit` / `pnpm audit` checks were verified by hand in Phase 10 ([SECURITY_REVIEW.md](SECURITY_REVIEW.md)) but are not yet automated.
 1. The adversarial SQL corpus (≥ 150 cases) is 100% rejected by the Guard, and with the Guard bypassed, 100% blocked or harmless at L4/L5.
 2. The cross-tenant test matrix passes for every resource route.
 3. `ruff S`, `gitleaks`, `pip-audit` and `pnpm audit --prod` (high/critical) are clean or have documented exceptions.
 4. The prompt-injection test set (malicious column names/values/descriptions) causes no Guard bypass and no instruction-following that changes the run's scope.
-5. The CSP is present in production responses (Playwright check).
+5. The security headers are present in production responses. Phase 10 checked this with curl against a production build; it is not yet a Playwright check.

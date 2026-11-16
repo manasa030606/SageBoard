@@ -1,8 +1,8 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Eye, EyeOff } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
-import { useId } from "react";
+import { useId, useState } from "react";
 
 import { cn } from "@/lib/cn";
 
@@ -13,6 +13,33 @@ const control =
 
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input className={cn(control, "h-9 px-3", className)} {...props} />;
+}
+
+/**
+ * Password input with a show/hide button inside its right edge. Hidden by default. The
+ * button keeps the focus where it was (mouse press doesn't take it from the input), and its
+ * label says what it does now ("Show characters" / "Hide characters"). It avoids the word
+ * "password" on purpose: a label search for the field by that word must still find one element.
+ */
+export function PasswordInput({ className, ...props }: Omit<ComponentProps<"input">, "type">) {
+  const [visible, setVisible] = useState(false);
+  const Icon = visible ? EyeOff : Eye;
+  return (
+    <span className="relative block">
+      <Input {...props} type={visible ? "text" : "password"} className={cn("pr-10", className)} />
+      <button
+        type="button"
+        aria-label={visible ? "Hide characters" : "Show characters"}
+        aria-pressed={visible}
+        aria-controls={props.id}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setVisible((v) => !v)}
+        className="absolute inset-y-0 right-0 grid w-10 place-items-center rounded-r-sm text-ink-3 transition-colors hover:text-ink focus-visible:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-forest"
+      >
+        <Icon className="size-4" aria-hidden strokeWidth={1.75} />
+      </button>
+    </span>
+  );
 }
 
 export function Select({

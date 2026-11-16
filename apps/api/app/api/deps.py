@@ -26,6 +26,7 @@ from app.auth.ratelimit import RateLimiter
 from app.auth.tokens import tokens_match
 from app.core.config import Settings
 from app.core.errors import CsrfError, RateLimitedError, ServiceUnavailableError
+from app.core.logging import get_logger
 from app.db.engines import Databases
 from app.db.models import User
 from app.services.analysis import AnalysisService
@@ -36,6 +37,7 @@ from app.services.health import HealthService
 from app.services.history import HistoryService
 from app.services.reports import ReportService
 
+log = get_logger(__name__)
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
@@ -138,6 +140,8 @@ RateLimiterDep = Annotated[RateLimiter, Depends(get_rate_limiter)]
 def enforce(limiter: RateLimiter, key: str, limit: int, window_s: float, message: str) -> None:
     retry_after = limiter.hit(key, limit, window_s)
     if retry_after is not None:
+        # Only the kind of limit is logged: the key can contain an email address or an IP.
+        log.warning("rate_limited", limit=key.split(":", 1)[0], retry_after_s=retry_after)
         raise RateLimitedError(retry_after, message)
 
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import passwords, tokens
@@ -74,7 +75,13 @@ class AuthService:
 
         user = User(email=email, full_name=name, password_hash=passwords.hash_password(password))
         self.session.add(user)
-        await self.session.flush()
+        try:
+            await self.session.flush()
+        except IntegrityError:  # two sign-ups with the same address raced past the check above
+            await self.session.rollback()
+            raise ConflictError(
+                "An account with this email already exists. Sign in instead.", code="EMAIL_TAKEN"
+            ) from None
         audit.record(self.session, "auth.register", actor_id=user.id, ip=ip)
         return await self._issue(user, family_id=uuid.uuid4(), user_agent=user_agent)
 

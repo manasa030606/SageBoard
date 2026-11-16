@@ -26,6 +26,9 @@ def create_engine(settings: Settings) -> AsyncEngine | None:
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
         pool_pre_ping=True,
+        # Driver errors would otherwise print the bound values (emails, password hashes, report
+        # text) into logs and tracebacks.
+        hide_parameters=True,
         connect_args={
             "timeout": settings.db_connect_timeout_s,
             "server_settings": {"application_name": settings.app_name},

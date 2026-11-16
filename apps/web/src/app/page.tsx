@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { HomeLink } from "@/components/brand/home-link";
 import { Logo } from "@/components/brand/logo";
 import { ButtonLink } from "@/components/ui/button";
 
@@ -81,9 +82,9 @@ export default function LandingPage() {
     <div className="flex flex-1 flex-col">
       <header className="sticky top-0 z-30 border-b border-line/80 bg-warm/95 backdrop-blur-sm">
         <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-5 sm:px-8">
-          <Link href="/" aria-label="Sageboard home">
+          <HomeLink>
             <Logo />
-          </Link>
+          </HomeLink>
           <nav
             aria-label="Primary"
             className="hidden items-center gap-7 text-sm text-ink-2 md:flex"
@@ -230,7 +231,9 @@ export default function LandingPage() {
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-[1200px] flex-col gap-4 px-5 py-8 text-[13px] text-ink-2 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <div className="flex items-center gap-3">
-            <Logo />
+            <HomeLink>
+              <Logo />
+            </HomeLink>
             <span className="hidden sm:inline">Your data. Your questions. Clear decisions.</span>
           </div>
           <div className="flex gap-6">
